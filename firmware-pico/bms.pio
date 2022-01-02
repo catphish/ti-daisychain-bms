@@ -1,0 +1,91 @@
+.program daisychain_tx
+.side_set 1
+.wrap_target
+  pull block            sideset 0 // Block until we get a word from the CPU, and put it on the shift register (ISR), meanwhile don't control the line
+  mov pins, !NULL [15]  sideset 1 // Wait a while, but start controlling the line (sideset)
+  mov pins, !NULL [15]  sideset 1 // Wait a while longer
+  set y, 7              sideset 1 // Loop counter
+  mov pins, NULL   [4]  sideset 1 // Set data pin LOW. This is the first half of the start bit
+  mov pins, ! NULL [3]  sideset 1 // Set data pin HIGH. This is the second half of the start bit
+bitloop:
+  out x, 1              sideset 1 // Shift one bit off the ISR to register X
+  mov pins, x      [4]  sideset 1 // Output x to the data pin
+  mov pins, ! x    [2]  sideset 1 // Output inverse of x to the data pin
+  jmp y-- bitloop       sideset 1 // Loop for 8 bits
+  out x, 1              sideset 1 // Load bit 9, this is the framing bit, if it's set, we transmit LH, else we transmit nothing (HH)
+  mov pins, ! x    [4]  sideset 1 // Send first half of final bit (a 1 in bit 9 activates the framing)
+  mov pins, ! NULL [4]  sideset 1 // Last half of final but is always high. Add a short delay before wrapping and releasing the line
+.wrap
+
+% c-sdk {
+static inline void daisychain_tx_program_init(PIO pio, uint sm, uint offset, uint datapin, uint enablepin) {
+    pio_sm_set_consecutive_pindirs(pio, sm, datapin, 1, true);
+    pio_sm_set_consecutive_pindirs(pio, sm, enablepin, 1, true);
+    pio_gpio_init(pio, datapin);
+    pio_gpio_init(pio, enablepin);
+
+    pio_sm_config c = daisychain_tx_program_get_default_config(offset);
+    sm_config_set_sideset_pins(&c, enablepin);
+    sm_config_set_out_pins(&c, datapin, 1);
+    sm_config_set_out_shift(&c, true, false, 9);
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+    sm_config_set_clkdiv(&c, 2);
+    pio_sm_init(pio, sm, offset, &c);
+
+    pio_sm_set_enabled(pio, sm, true);
+}
+%}
+
+.program daisychain_rx
+.wrap_target
+beginning:
+  wait 0 pin 0          // Wait for data input to go low
+  jmp pin beginning     // Loop back to igore the data if we're transmitting
+  nop               [9] // Skip the first bit
+  set y, 7              // Loop counter
+bitloop:
+  mov x, pins          // Read a bit (low-high is a binary 0 and we're reading the first half)
+  in x, 1         [7]   // Put the bit into the OSR
+  jmp y-- bitloop       // Loop 8 bits
+
+  mov x, !pins           // Read the framing bit and invert it, no need to invert this one
+  in x, 1               // Put the framing bit into the OSR
+  in null, 23           // Dump 23 bits of zero into the OSR to align things
+  push noblock          // Push to FIFO
+.wrap
+
+% c-sdk {
+static inline void daisychain_rx_program_init(PIO pio, uint sm, uint offset, uint datapin, uint enablepin) {
+    pio_sm_set_consecutive_pindirs(pio, sm, datapin, 1, false);
+    pio_gpio_init(pio, datapin);
+
+    pio_sm_config c = daisychain_rx_program_get_default_config(offset);
+    sm_config_set_in_pins(&c, datapin);
+    sm_config_set_jmp_pin(&c, enablepin);
+    sm_config_set_in_shift(&c, true, false, 9);
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
+    sm_config_set_clkdiv(&c, 2);
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+%}
+
+.program square_wave
+.side_set 1
+.wrap_target
+    nop sideset 1
+    nop sideset 0
+.wrap
+
+% c-sdk {
+static inline void square_wave_program_init(PIO pio, uint sm, uint offset, uint pin) {
+    pio_sm_set_consecutive_pindirs(pio, sm, pin, 1, true);
+    pio_gpio_init(pio, pin);
+
+    pio_sm_config c = square_wave_program_get_default_config(offset);
+    sm_config_set_sideset_pins(&c, pin);
+    sm_config_set_clkdiv(&c, 5);
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+%}

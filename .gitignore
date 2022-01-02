@@ -33,3 +33,6 @@ fp-info-cache
 
 # Archives
 *.zip
+
+# vscode config
+.vscode
