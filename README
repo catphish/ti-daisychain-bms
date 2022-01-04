@@ -94,7 +94,7 @@ minimum cell voltage.
 --------------------------------------------------------------------
 
 All values are big endian. Voltage values should be interpreted by dividing
-the value by 13107.2. Temperature values are 
+the value by 13107. Temperature values are 
 
 The following calculation can be used to convert the readong for an External NTC to a temperature:
 
