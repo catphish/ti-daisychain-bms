@@ -7,7 +7,9 @@
 #include "hardware/xosc.h"
 #include "hardware/rosc.h"
 #include "hardware/clocks.h"
+#include "hardware/sync.h"
 #include "bms.pio.h"
+#include "hardware/regs/io_bank0.h"
 #include "can.h"
 #include <math.h>
 
@@ -22,9 +24,10 @@
 #define SPI_CS   17
 #define SPI_CLK  18
 #define SPI_MOSI 19
+#define CAN_INT  20
 #define CAN_CLK  21 // 8MHz clock for CAN
 
-// Define pins for RS485 transceivers
+// Struct for RS485 transceiver info
 struct battery_interface {
   uint16_t serial_out;
   uint16_t serial_master;
@@ -35,6 +38,7 @@ struct battery_interface {
   uint16_t sm_tx;
 };
 
+// Define pins for RS485 transceivers
 struct battery_interface battery_interfaces[2] = {
   {
     .serial_out    = 2,
@@ -61,12 +65,13 @@ uint8_t can_data_buffer[16];
 
 // Other global variables
 uint8_t error_count = 0;
+uint8_t cycle_count = 0;
 uint16_t balance_threshold = 0;
 uint16_t cell_voltage[32][16];
 uint16_t aux_voltage[32][8];
 uint16_t balance_bitmap[32];
-uint8_t balancing_mode;
-uint32_t pack_voltage;
+uint32_t pack_voltage = 0;
+volatile uint8_t vehicle_state = 0;
 
 // Variables for balancing process and reporting
 uint16_t max_voltage;
@@ -147,8 +152,39 @@ void CAN_configure(uint16_t id) {
     CAN_reg_write(REG_RXFnEID0(n), 0);
   }
 
+  // Enable receive interrupts
+  CAN_reg_write(REG_CANINTE, 3);
+
   // Set normal operation mode
   CAN_reg_write(REG_CANCTRL, MODE_NORMAL);
+}
+
+uint8_t CAN_receive(uint8_t * can_rx_data) {
+  uint8_t intf = CAN_reg_read(REG_CANINTF);
+  uint8_t rtr;
+  uint8_t n; // One of two receive buffers
+  if(intf & FLAG_RXnIF(0)) {
+    n = 0;
+  } else if (intf & FLAG_RXnIF(1)) {
+    n = 1;
+  } else {
+    return 0;
+  }
+  rtr = (CAN_reg_read(REG_RXBnSIDL(n)) & FLAG_SRR) ? true : false;
+  uint8_t dlc = CAN_reg_read(REG_RXBnDLC(n)) & 0x0f;
+
+  uint8_t length;
+  if (rtr) {
+    length = 0;
+  } else {
+    length = dlc;
+
+    for (int i = 0; i < length; i++)
+      can_rx_data[i] = CAN_reg_read(REG_RXBnD0(n) + i);
+  }
+
+  CAN_reg_modify(REG_CANINTF, FLAG_RXnIF(n), 0x00);
+  return(length);
 }
 
 void CAN_transmit(uint16_t id, uint8_t* data, uint8_t length) {
@@ -298,54 +334,11 @@ uint8_t pcb_below_temp(uint8_t module) {
   return 1;
 }
 
-static void sleep_callback(void) {
-}
-
-static void rtc_sleep(uint sec) {
-  // Clock the CPU at 12MHz from the crystal oscillator
-  clock_configure(clk_sys,
-              CLOCKS_CLK_SYS_CTRL_SRC_VALUE_CLKSRC_CLK_SYS_AUX,
-              CLOCKS_CLK_SYS_CTRL_AUXSRC_VALUE_XOSC_CLKSRC,
-              12000000, 12000000);
-  // Shut down the system PLL
-  pll_deinit(pll_sys);
-
-  // Start on Friday 5th of June 2020 00:00:00
-  datetime_t t = {
-          .year  = 2020,
-          .month = 06,
-          .day   = 05,
-          .dotw  = 5,
-          .hour  = 0,
-          .min   = 0,
-          .sec   = 00
-  };
-
-  // Alarm sec seconds later
-  datetime_t t_alarm = {
-          .year  = 2020,
-          .month = 06,
-          .day   = 05,
-          .dotw  = 5,
-          .hour  = sec / 3600,
-          .min   = (sec % 3600) / 60,
-          .sec   = sec % 60
-  };
-
-  // Start the RTC
-  rtc_init();
-  rtc_set_datetime(&t);
-  sleep_goto_sleep_until(&t_alarm, &sleep_callback);
-
-  // Reconfigure system PLL
-  uint vco, postdiv1, postdiv2;
-  check_sys_clock_khz(80000, &vco, &postdiv1, &postdiv2);
-  pll_init(pll_sys, 1, vco, postdiv1, postdiv2);
-  // Clock CPU from 80MHz PLL
-  clock_configure(clk_sys,
-              CLOCKS_CLK_SYS_CTRL_SRC_VALUE_CLKSRC_CLK_SYS_AUX,
-              CLOCKS_CLK_SYS_CTRL_AUXSRC_VALUE_CLKSRC_PLL_SYS,
-              80000000, 80000000);
+void gpio_callback(uint gpio, uint32_t events) {
+  if(CAN_receive(can_data_buffer))
+    vehicle_state = can_data_buffer[0];
+  gpio_acknowledge_irq(CAN_INT, GPIO_IRQ_LEVEL_LOW);
+  cycle_count = 0;
 }
 
 int main()
@@ -362,9 +355,9 @@ int main()
   clock_stop(clk_adc);
   pll_deinit(pll_usb);
   rosc_disable();
-
-  // Wait a little at startup
-  sleep_ms(2000);
+  // Disable more clocks when sleeping
+  clocks_hw->sleep_en0 = CLOCKS_SLEEP_EN0_CLK_SYS_PLL_SYS_BITS;
+  clocks_hw->sleep_en1 = CLOCKS_SLEEP_EN1_CLK_SYS_XOSC_BITS | CLOCKS_SLEEP_EN1_CLK_SYS_TIMER_BITS;
 
   // Used for program loading
   int offset;
@@ -385,9 +378,13 @@ int main()
     gpio_set_dir(battery_interfaces[chain].serial_enable, GPIO_OUT);
   }
 
-  // Load and initialize 8MHz square wave generator
-  offset = pio_add_program(pio1, &square_wave_program);
-  square_wave_program_init(pio1, SM_SQ, offset, CAN_CLK);
+  gpio_init(CAN_INT);
+  gpio_set_dir(CAN_INT,GPIO_IN);
+  gpio_disable_pulls(CAN_INT);
+  gpio_set_irq_enabled_with_callback(CAN_INT, GPIO_IRQ_LEVEL_LOW, true, &gpio_callback);
+
+  // Output 8MHz square wave on CAN_CLK pin
+  clock_gpio_init(CAN_CLK, CLOCKS_CLK_GPOUT0_CTRL_AUXSRC_VALUE_CLKSRC_PLL_SYS, 10);
 
   // Configure SPI to communicate with CAN
   SPI_configure();
@@ -502,14 +499,27 @@ softreset:
       send_command(battery_interfaces + chain, (uint8_t[]){ 0x92,submodule,0x14,balance_bitmap[module] >> 8, balance_bitmap[module] }, 5);
     }
 
-    // If nothing is balancing, put the modules into low power sleep
-    if(balance_threshold == 0) sleep_modules();
-
     // Send general status information to CAN
     CAN_transmit(0x4f0, (uint8_t[]){ pack_voltage>>24, pack_voltage>>16, pack_voltage>>8, pack_voltage, balance_threshold >> 8, balance_threshold, error_count, battery_interfaces[0].module_count + battery_interfaces[1].module_count }, 8);
     CAN_transmit(0x4f1, (uint8_t[]){ max_voltage >> 8, max_voltage, min_voltage >> 8, min_voltage, max_temperature >> 8, max_temperature, min_temperature >> 8, min_temperature }, 8);
 
-    // Put controller into low power sleep for 15 seconds
-    rtc_sleep(15+1);
+    if(balance_threshold) {
+      // We're balancing, sleep for 1 second only
+      sleep_ms(1000);
+    } else {
+      // Not balancing, sleep depends on vehicle state
+      if(vehicle_state) {
+        // Vehicle is awake, sleep for 1 second
+        sleep_ms(1000);
+      } else {
+        // Put the modules into low power sleep
+        if(balance_threshold == 0) sleep_modules();
+        // Vehicle is asleep, sleep until CAN activity
+        while(!vehicle_state) __wfi();
+      }
+    }
+
+    // If 10 iterations (approx 10 seconds) have passed since the last vehicle status, assume sleep
+    if(cycle_count++ >= 10) vehicle_state = 0;
   }
 }

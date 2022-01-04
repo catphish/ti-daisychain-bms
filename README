@@ -1,4 +1,105 @@
 TI Daisychain BMS Master
 ========================
 
-Hardware to connect to bq76PL455A BMS slaves.
+BMS master for daisychained bq76PL455A slave modules.
+
+Connection J1
+=============
+
+Connect to the daisychain connector at the positive end of a string of
+up to 2 strings of up to 16 batteries.
+
+-----------------------------
+| B1p1 |  NC  |  NC  | B2p2 |
+| B1p2 |  NC  |  NC  | B2p1 |
+-----------------------------
+
+B1p1 is pin 1 of the first battery pack
+B1p2 is pin 2 of the first battery pack
+B2p1 is pin 1 of the second battery pack
+B2p2 is pin 2 of the second battery pack
+
+Connection J2
+=============
+
+Connect to 12V power and CAN
+
+------------------------
+| CANH |  NC   |   NC  |
+| CANL |  GND  |  +12V |
+------------------------
+
+General Operation
+=================
+
+By default, the module will enter sleep mode. It will consume approximately
+6.5mA from the 12V supply and will not communicate with the battery modules
+or transmit any CAN messages. Upon receiving a vehicle status message with
+a status greater than zero, the module will wake up and monitor cell voltages
+once per second. Data will be send by CAN, and if conditions are met, cells
+will be balanced. When a vehicle status of zero is received, or no vehicle
+status is received for 10 seconds, the module will return to sleeo mode. If
+balancing is being performed, balancing will be completed before returning
+to sleep mode.
+
+Balancing
+=========
+
+If any cell voltage is detected as being higher than 4.0V and more than 10mV
+higher than the lowest recorded cell voltage, it will be bled until one of
+these ocnditions is no longer met. To prevent excessive heat, only one cell
+in each battery (16 cell module) will be bled simultaneously. If multiple cells
+meet the criteria, the cell with the highest voltage will be selected.
+Balancing will be considered complete when no cells meet the criteria for
+balancing.
+
+CAN Messages Received
+=====================
+
+One CAN message is accepted by the BMS module, containing vehicle statue.
+
+---------------------------
+| CAN ID | Byte 0         |
+| 0x4F8  | Vehicle Status |
+---------------------------
+
+A vehicle status of zero is interpreted as a low power state, and should be
+used when battery monitoring is not required. It is recommended to transmit
+this state if neither the ignition nor charger are active.
+
+A status greater than one is interpreted as a high power state. This will
+cause the balancer to actively monitor cell voltages. Power usage will increase
+and the CAN messages described below will be transmitted. Non zero states
+should be used to indicate modes such as "charge" or "drive" but the details
+of such modes are not important to the BMS module.
+
+CAN Messages Sent
+=================
+
+--------------------------------------------------------------------------------
+| CAN ID | Byte 0-3           | Byte 4-5          | Byte 6      | Byte 7       |
+| 0x4f0  | Total Pack Voltage | Balance Threshold | Error count | Module count |
+--------------------------------------------------------------------------------
+
+Total pack voltage it the sum of all modules. For parallel packs this value
+will be a multiple of the real pack voltage.
+
+Balance threshold will be a non-zero value when balancing is active and
+indicates the target voltage, generally this will be 10mV higher than the
+minimum cell voltage.
+
+--------------------------------------------------------------------
+| CAN ID | Byte 0-1   | Byte 2-3   | Byte 4-5      | Byte 6-7      |
+| 0x4f1  | Max Cell V | Min Cell V | Max Cell Temp | Min Cell Temp |
+--------------------------------------------------------------------
+
+All values are big endian. Voltage values should be interpreted by dividing
+the value by 13107.2. Temperature values are 
+
+The following calculation can be used to convert the readong for an External NTC to a temperature:
+
+float temperature(uint16_t adc) {
+  float r = 0.0000000347363427499292f * adc * adc - 0.001025770762903f * adc + 2.68235340614337f;
+  float t = log(r) * -30.5280964239816f + 95.6841501312447f;
+  return t;
+}
