@@ -152,17 +152,6 @@ F 3 "" H 10050 5100 50  0001 C CNN
 	1    0    0    -1  
 $EndComp
 $Comp
-L power:GND #PWR024
-U 1 1 617A7038
-P 9650 4900
-F 0 "#PWR024" H 9650 4650 50  0001 C CNN
-F 1 "GND" V 9655 4772 50  0000 R CNN
-F 2 "" H 9650 4900 50  0001 C CNN
-F 3 "" H 9650 4900 50  0001 C CNN
-	1    9650 4900
-	0    1    1    0   
-$EndComp
-$Comp
 L power:+5V #PWR018
 U 1 1 61749E96
 P 6400 4350
@@ -246,67 +235,67 @@ $EndComp
 $Comp
 L Mechanical:MountingHole_Pad H1
 U 1 1 6199AFD3
-P 2150 6350
-F 0 "H1" H 2250 6353 50  0000 L CNN
-F 1 "MountingHole" H 2250 6308 50  0001 L CNN
-F 2 "MountingHole:MountingHole_3.2mm_M3_Pad" H 2150 6350 50  0001 C CNN
-F 3 "~" H 2150 6350 50  0001 C CNN
-	1    2150 6350
+P 2550 4900
+F 0 "H1" H 2650 4903 50  0000 L CNN
+F 1 "MountingHole" H 2650 4858 50  0001 L CNN
+F 2 "MountingHole:MountingHole_3.2mm_M3_Pad" H 2550 4900 50  0001 C CNN
+F 3 "~" H 2550 4900 50  0001 C CNN
+	1    2550 4900
 	1    0    0    -1  
 $EndComp
 $Comp
 L Mechanical:MountingHole_Pad H2
 U 1 1 6199C740
-P 2450 6350
-F 0 "H2" H 2550 6353 50  0000 L CNN
-F 1 "MountingHole" H 2550 6308 50  0001 L CNN
-F 2 "MountingHole:MountingHole_3.2mm_M3_Pad" H 2450 6350 50  0001 C CNN
-F 3 "~" H 2450 6350 50  0001 C CNN
-	1    2450 6350
+P 2850 4900
+F 0 "H2" H 2950 4903 50  0000 L CNN
+F 1 "MountingHole" H 2950 4858 50  0001 L CNN
+F 2 "MountingHole:MountingHole_3.2mm_M3_Pad" H 2850 4900 50  0001 C CNN
+F 3 "~" H 2850 4900 50  0001 C CNN
+	1    2850 4900
 	1    0    0    -1  
 $EndComp
 $Comp
 L Mechanical:MountingHole_Pad H3
 U 1 1 6199C8D6
-P 2750 6350
-F 0 "H3" H 2850 6353 50  0000 L CNN
-F 1 "MountingHole" H 2850 6305 50  0001 L CNN
-F 2 "MountingHole:MountingHole_3.2mm_M3_Pad" H 2750 6350 50  0001 C CNN
-F 3 "~" H 2750 6350 50  0001 C CNN
-	1    2750 6350
+P 3150 4900
+F 0 "H3" H 3250 4903 50  0000 L CNN
+F 1 "MountingHole" H 3250 4855 50  0001 L CNN
+F 2 "MountingHole:MountingHole_3.2mm_M3_Pad" H 3150 4900 50  0001 C CNN
+F 3 "~" H 3150 4900 50  0001 C CNN
+	1    3150 4900
 	1    0    0    -1  
 $EndComp
 $Comp
 L Mechanical:MountingHole_Pad H4
 U 1 1 6199CA74
-P 3050 6350
-F 0 "H4" H 3150 6353 50  0000 L CNN
-F 1 "MountingHole" H 3150 6305 50  0001 L CNN
-F 2 "MountingHole:MountingHole_3.2mm_M3_Pad" H 3050 6350 50  0001 C CNN
-F 3 "~" H 3050 6350 50  0001 C CNN
-	1    3050 6350
+P 3450 4900
+F 0 "H4" H 3550 4903 50  0000 L CNN
+F 1 "MountingHole" H 3550 4855 50  0001 L CNN
+F 2 "MountingHole:MountingHole_3.2mm_M3_Pad" H 3450 4900 50  0001 C CNN
+F 3 "~" H 3450 4900 50  0001 C CNN
+	1    3450 4900
 	1    0    0    -1  
 $EndComp
 Wire Wire Line
-	2150 6450 2450 6450
-Connection ~ 2450 6450
+	2550 5000 2850 5000
+Connection ~ 2850 5000
 Wire Wire Line
-	2450 6450 2750 6450
-Connection ~ 2750 6450
+	2850 5000 3150 5000
+Connection ~ 3150 5000
 Wire Wire Line
-	2750 6450 3050 6450
+	3150 5000 3450 5000
 $Comp
 L power:GND #PWR031
 U 1 1 619B5460
-P 3050 6450
-F 0 "#PWR031" H 3050 6200 50  0001 C CNN
-F 1 "GND" H 3055 6277 50  0000 C CNN
-F 2 "" H 3050 6450 50  0001 C CNN
-F 3 "" H 3050 6450 50  0001 C CNN
-	1    3050 6450
+P 3450 5000
+F 0 "#PWR031" H 3450 4750 50  0001 C CNN
+F 1 "GND" H 3455 4827 50  0000 C CNN
+F 2 "" H 3450 5000 50  0001 C CNN
+F 3 "" H 3450 5000 50  0001 C CNN
+	1    3450 5000
 	1    0    0    -1  
 $EndComp
-Connection ~ 3050 6450
+Connection ~ 3450 5000
 $Comp
 L Regulator_Switching:TPS62160DGK U4
 U 1 1 6174E98B
@@ -648,10 +637,6 @@ F 3 "" H 4700 5250 50  0001 C CNN
 	1    4700 5250
 	0    1    1    0   
 $EndComp
-Text GLabel 6700 1500 0    50   BiDi ~ 0
-EVSE_CP
-Text GLabel 6700 1600 0    50   BiDi ~ 0
-EVSE_PP
 Text GLabel 7200 1700 2    50   BiDi ~ 0
 CANL
 Text GLabel 6700 1700 0    50   BiDi ~ 0
@@ -1194,4 +1179,127 @@ Wire Wire Line
 	1300 4700 1300 4800
 Wire Wire Line
 	1300 5100 1300 5200
+$Comp
+L Device:R R13
+U 1 1 61DD7F66
+P 1450 6700
+F 0 "R13" H 1520 6746 50  0000 L CNN
+F 1 "4k7" H 1520 6655 50  0000 L CNN
+F 2 "Resistor_SMD:R_0603_1608Metric" V 1380 6700 50  0001 C CNN
+F 3 "~" H 1450 6700 50  0001 C CNN
+F 4 "C23162" H 1450 6700 50  0001 C CNN "LCSC"
+	1    1450 6700
+	1    0    0    -1  
+$EndComp
+$Comp
+L Device:R R14
+U 1 1 61DD8D2C
+P 1450 7100
+F 0 "R14" H 1520 7146 50  0000 L CNN
+F 1 "1k5" H 1520 7055 50  0000 L CNN
+F 2 "Resistor_SMD:R_0603_1608Metric" V 1380 7100 50  0001 C CNN
+F 3 "~" H 1450 7100 50  0001 C CNN
+F 4 "C22843" H 1450 7100 50  0001 C CNN "LCSC"
+	1    1450 7100
+	1    0    0    -1  
+$EndComp
+$Comp
+L Device:D_Zener D6
+U 1 1 61DD9637
+P 1800 7100
+F 0 "D6" V 1754 7180 50  0000 L CNN
+F 1 "3v" V 1845 7180 50  0000 L CNN
+F 2 "Diode_SMD:D_MiniMELF" H 1800 7100 50  0001 C CNN
+F 3 "~" H 1800 7100 50  0001 C CNN
+F 4 "C8056" V 1800 7100 50  0001 C CNN "LCSC"
+	1    1800 7100
+	0    1    1    0   
+$EndComp
+$Comp
+L Device:C C11
+U 1 1 61DD9B38
+P 1100 7100
+F 0 "C11" H 1215 7146 50  0000 L CNN
+F 1 "470n" H 1215 7055 50  0000 L CNN
+F 2 "Capacitor_SMD:C_0603_1608Metric" H 1138 6950 50  0001 C CNN
+F 3 "~" H 1100 7100 50  0001 C CNN
+F 4 "C1623" H 1100 7100 50  0001 C CNN "LCSC"
+	1    1100 7100
+	1    0    0    -1  
+$EndComp
+$Comp
+L Driver_FET:NCV8402xST Q1
+U 1 1 61DDABE2
+P 3400 6850
+F 0 "Q1" H 3828 6896 50  0000 L CNN
+F 1 "NCV8402xST" H 3828 6805 50  0000 L CNN
+F 2 "Package_TO_SOT_SMD:SOT-223" H 3400 6570 50  0001 C CNN
+F 3 "https://www.onsemi.com/pub/Collateral/NCV8402-D.PDF" H 3700 6850 50  0001 C CNN
+F 4 "C77755" H 3400 6850 50  0001 C CNN "LCSC"
+	1    3400 6850
+	1    0    0    -1  
+$EndComp
+Text GLabel 2900 6850 0    50   Input ~ 0
+OUT1
+Text GLabel 3750 6400 2    50   Output ~ 0
+OUT12_1
+Wire Wire Line
+	3750 6400 3700 6400
+Wire Wire Line
+	3700 6400 3700 6450
+Wire Wire Line
+	1450 6850 1450 6950
+Wire Wire Line
+	1100 6950 1450 6950
+Connection ~ 1450 6950
+Wire Wire Line
+	1100 7250 1450 7250
+Wire Wire Line
+	1450 7250 1800 7250
+Connection ~ 1450 7250
+Wire Wire Line
+	1800 6950 1450 6950
+$Comp
+L power:GND #PWR0108
+U 1 1 61DBD09A
+P 1450 7250
+F 0 "#PWR0108" H 1450 7000 50  0001 C CNN
+F 1 "GND" H 1455 7077 50  0000 C CNN
+F 2 "" H 1450 7250 50  0001 C CNN
+F 3 "" H 1450 7250 50  0001 C CNN
+	1    1450 7250
+	1    0    0    -1  
+$EndComp
+$Comp
+L power:GND #PWR0109
+U 1 1 61DBD4E0
+P 3700 7250
+F 0 "#PWR0109" H 3700 7000 50  0001 C CNN
+F 1 "GND" H 3705 7077 50  0000 C CNN
+F 2 "" H 3700 7250 50  0001 C CNN
+F 3 "" H 3700 7250 50  0001 C CNN
+	1    3700 7250
+	1    0    0    -1  
+$EndComp
+Text GLabel 1900 6950 2    50   Output ~ 0
+IN1
+Text GLabel 1250 6550 0    50   Input ~ 0
+IN12_1
+Wire Wire Line
+	1250 6550 1450 6550
+Wire Wire Line
+	1800 6950 1900 6950
+Connection ~ 1800 6950
+Text GLabel 6100 5450 2    50   Input ~ 0
+IN1
+Text GLabel 6100 5350 2    50   Output ~ 0
+OUT1
+Text GLabel 6700 1500 0    50   Input ~ 0
+OUT12_1
+Text GLabel 6700 1600 0    50   Output ~ 0
+IN12_1
+Text GLabel 9650 4900 0    50   Input ~ 0
+Rs
+Text GLabel 6100 5650 2    50   Output ~ 0
+Rs
 $EndSCHEMATC
