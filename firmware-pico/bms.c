@@ -18,14 +18,23 @@
 // Min absolute voltage to enable balancing. 52428 = 4.0V, 53738 = 4.1V, 54525 = 4.16V
 #define BALANCE_MIN 52428
 
+// The number of active battery interfaces
+#define CHAIN_COUNT 3
+#define MAX_MODULES (16 * CHAIN_COUNT)
+
+// Hardware wakeup pins
+#define WAKE1 26
+#define WAKE2 27
+
 // Define pins for SPI (to CAN)
-#define SPI_PORT spi0
-#define SPI_MISO 16
-#define SPI_CS   17
-#define SPI_CLK  18
-#define SPI_MOSI 19
-#define CAN_INT  20
-#define CAN_CLK  21 // 8MHz clock for CAN
+#define SPI_PORT  spi0
+#define SPI_MISO  16
+#define SPI_CS    17
+#define SPI_CLK   18
+#define SPI_MOSI  19
+#define CAN_INT   20 // Interrupt from CAN controller
+#define CAN_CLK   21 // 8MHz clock for CAN
+#define CAN_SLEEP 22 // Shut down CAN transceiver
 
 // Struct for RS485 transceiver info
 struct battery_interface {
@@ -34,44 +43,47 @@ struct battery_interface {
   uint16_t serial_enable;
   uint16_t serial_in;
   uint16_t module_count;
-  uint16_t sm_rx;
-  uint16_t sm_tx;
+  uint16_t sm;
 };
 
 // Define pins for RS485 transceivers
-struct battery_interface battery_interfaces[2] = {
+struct battery_interface battery_interfaces[3] = {
   {
     .serial_out    = 2,
     .serial_master = 3,
     .serial_enable = 4,
     .serial_in     = 5,
     .module_count  = 0,
-    .sm_rx         = 0,
-    .sm_tx         = 1,
+    .sm            = 0,
+  }, {
+    .serial_out    = 6,
+    .serial_master = 7,
+    .serial_enable = 8,
+    .serial_in     = 9,
+    .module_count  = 0,
+    .sm            = 1,
   }, {
     .serial_out    = 10,
     .serial_master = 11,
     .serial_enable = 12,
     .serial_in     = 13,
     .module_count  = 0,
-    .sm_rx         = 2,
-    .sm_tx         = 3,
+    .sm            = 2,
   }
 };
 
 // Buffers for received data
 uint8_t rx_data_buffer[128];
-uint8_t can_data_buffer[16];
 
 // Other global variables
 uint8_t error_count = 0;
 uint8_t cycle_count = 0;
 uint16_t balance_threshold = 0;
-uint16_t cell_voltage[32][16];
-uint16_t aux_voltage[32][8];
-uint16_t balance_bitmap[32];
+uint16_t cell_voltage[MAX_MODULES][16];
+uint16_t aux_voltage[MAX_MODULES][8];
+uint16_t balance_bitmap[MAX_MODULES];
 uint32_t pack_voltage = 0;
-volatile uint8_t vehicle_state = 0;
+//volatile uint8_t vehicle_state = 0;
 
 // Variables for balancing process and reporting
 uint16_t max_voltage;
@@ -159,34 +171,6 @@ void CAN_configure(uint16_t id) {
   CAN_reg_write(REG_CANCTRL, MODE_NORMAL);
 }
 
-uint8_t CAN_receive(uint8_t * can_rx_data) {
-  uint8_t intf = CAN_reg_read(REG_CANINTF);
-  uint8_t rtr;
-  uint8_t n; // One of two receive buffers
-  if(intf & FLAG_RXnIF(0)) {
-    n = 0;
-  } else if (intf & FLAG_RXnIF(1)) {
-    n = 1;
-  } else {
-    return 0;
-  }
-  rtr = (CAN_reg_read(REG_RXBnSIDL(n)) & FLAG_SRR) ? true : false;
-  uint8_t dlc = CAN_reg_read(REG_RXBnDLC(n)) & 0x0f;
-
-  uint8_t length;
-  if (rtr) {
-    length = 0;
-  } else {
-    length = dlc;
-
-    for (int i = 0; i < length; i++)
-      can_rx_data[i] = CAN_reg_read(REG_RXBnD0(n) + i);
-  }
-
-  CAN_reg_modify(REG_CANINTF, FLAG_RXnIF(n), 0x00);
-  return(length);
-}
-
 void CAN_transmit(uint16_t id, uint8_t* data, uint8_t length) {
   CAN_reg_write(REG_TXBnSIDH(0), id >> 3); // Set CAN ID
   CAN_reg_write(REG_TXBnSIDL(0), id << 5); // Set CAN ID
@@ -223,35 +207,35 @@ void wakeup(struct battery_interface * battery_interface) {
   // Enable the line driver
   gpio_put(battery_interface->serial_enable, 0);
   // Disable TX PIO
-  pio_sm_set_enabled(pio0, battery_interface->sm_tx, false);
+  pio_sm_set_enabled(pio0, battery_interface->sm, false);
   // Wait for it to be disabled
   busy_wait_ms(1);
   // Loop for 200 x 10us = 2ms
   for(int n=0; n<200; n++) {
-    pio_sm_set_pins(pio0, battery_interface->sm_tx, (1 << battery_interface->serial_master) | (1 << battery_interface->serial_out)); // Drive DO high (DE enabled)
+    pio_sm_set_pins(pio0, battery_interface->sm, (1 << battery_interface->serial_master) | (1 << battery_interface->serial_out)); // Drive DO high (DE enabled)
     busy_wait_us(4);
-    pio_sm_set_pins(pio0, battery_interface->sm_tx, (1 << battery_interface->serial_master) | (0 << battery_interface->serial_out)); // Drive DO low (DE enabled)
+    pio_sm_set_pins(pio0, battery_interface->sm, (1 << battery_interface->serial_master) | (0 << battery_interface->serial_out)); // Drive DO low (DE enabled)
     busy_wait_us(4);
   }
-  pio_sm_set_pins(pio0, battery_interface->sm_tx, (1 << battery_interface->serial_master) | (1 << battery_interface->serial_out)); // Drive DO high (DE enabled)
+  pio_sm_set_pins(pio0, battery_interface->sm, (1 << battery_interface->serial_master) | (1 << battery_interface->serial_out)); // Drive DO high (DE enabled)
   busy_wait_us(4);
   // Disable DE, stop driving bus
-  pio_sm_set_pins(pio0, battery_interface->sm_tx, 0);
+  pio_sm_set_pins(pio0, battery_interface->sm, 0);
   // Re-enable TX PIO
-  pio_sm_set_enabled(pio0, battery_interface->sm_tx, true);
+  pio_sm_set_enabled(pio0, battery_interface->sm, true);
 }
 
 // Send a command string
 void send_command(struct battery_interface * battery_interface, uint8_t* command, uint8_t length) {
   // Append framing but to the first byte and send it
-  pio_sm_put_blocking(pio0, battery_interface->sm_tx, command[0] | 0x100);
+  pio_sm_put_blocking(pio0, battery_interface->sm, command[0] | 0x100);
   // Send remaining bytes
   for(int n=1; n<length; n++)
-    pio_sm_put_blocking(pio0, battery_interface->sm_tx, command[n]);
+    pio_sm_put_blocking(pio0, battery_interface->sm, command[n]);
   // Calculate and send CRC16
   uint16_t crc = crc16(command, length);
-  pio_sm_put_blocking(pio0, battery_interface->sm_tx, crc & 0xFF);
-  pio_sm_put_blocking(pio0, battery_interface->sm_tx, crc >> 8);
+  pio_sm_put_blocking(pio0, battery_interface->sm, crc & 0xFF);
+  pio_sm_put_blocking(pio0, battery_interface->sm, crc >> 8);
   busy_wait_us(20); // Always insert a short pause after sending commands
 }
 
@@ -264,9 +248,9 @@ uint16_t receive_data(struct battery_interface * battery_interface, uint8_t* buf
   // Loop until timeout expires
   for(int n=0; n<timeout; n++) {
     // Check for data in input FIFO
-    while(!pio_sm_is_rx_fifo_empty(pio0, battery_interface->sm_rx)) {
+    while(!pio_sm_is_rx_fifo_empty(pio1, battery_interface->sm)) {
       // Receive one byte
-      buffer[rx_data_offset++] = pio_sm_get_blocking(pio0, battery_interface->sm_rx);
+      buffer[rx_data_offset++] = pio_sm_get_blocking(pio1, battery_interface->sm);
       // Return full size if we've filled the string
       if(rx_data_offset == size) return size;
     }
@@ -291,7 +275,7 @@ void configure(struct battery_interface * battery_interface) {
   }
   for(int n=0; n<16; n++) {
     // Attempt to read back the address from each device
-    pio_sm_clear_fifos(pio0, battery_interface->sm_rx);
+    pio_sm_clear_fifos(pio1, battery_interface->sm);
     send_command(battery_interface, (uint8_t[]){0x81,n,0x0A,0x00}, 4);
     uint16_t received = receive_data(battery_interface, rx_data_buffer, 4, 10000);
     // If we don't receive a response, assume there are no more modules
@@ -309,19 +293,23 @@ void sample_all() {
   // 0xFF 0xFF 0xFF - these 24 bits enable sampling of 16 cell voltages and
   //                  8 AUX channels. Some will contain temperature data.
   //                  16x oversampling.
-  send_command(battery_interfaces + 0, (uint8_t[]){0xF6,0x02,0x00,0xFF,0xFF,0xFF,0x00,0x04}, 8);
-  send_command(battery_interfaces + 1, (uint8_t[]){0xF6,0x02,0x00,0xFF,0xFF,0xFF,0x00,0x04}, 8);
+  for(int n=0; n<CHAIN_COUNT; n++)
+    send_command(battery_interfaces + n, (uint8_t[]){0xF6,0x02,0x00,0xFF,0xFF,0xFF,0x00,0x04}, 8);
   // Wait for sampling to complete
   busy_wait_ms(10);
 }
 
 // Put all modules to sleep
 void sleep_modules() {
-  send_command(battery_interfaces + 0, (uint8_t[]){0xF1,0x0C,0x48}, 3);
-  send_command(battery_interfaces + 1, (uint8_t[]){0xF1,0x0C,0x48}, 3);
+  // Broadcast sleep command to each chain
+  for(int n=0; n<CHAIN_COUNT; n++)
+    send_command(battery_interfaces + n, (uint8_t[]){0xF1,0x0C,0x48}, 3);
+  // Wait a little for safety
+  busy_wait_ms(1);
   // Disable line drivers
-  gpio_put(battery_interfaces[0].serial_enable, 1);
-  gpio_put(battery_interfaces[1].serial_enable, 1);
+  for(int n=0; n<CHAIN_COUNT; n++)
+    gpio_put(battery_interfaces[n].serial_enable, 1);
+  // Ensure modules are woken when needed again
   rewake = 1;
 }
 
@@ -334,17 +322,10 @@ uint8_t pcb_below_temp(uint8_t module) {
   return 1;
 }
 
-void gpio_callback(uint gpio, uint32_t events) {
-  if(CAN_receive(can_data_buffer))
-    vehicle_state = can_data_buffer[0];
-  gpio_acknowledge_irq(CAN_INT, GPIO_IRQ_LEVEL_LOW);
-  cycle_count = 0;
-}
+// Dummy interrupt for hardware wakeup
+void gpio_callback() {}
 
-int main()
-{
-  // Set system clock to 80MHz, this seems like a reasonable value for the 4MHz data
-  set_sys_clock_khz(80000, true);
+void reconfigure_clocks() {
   // Clock the peripherals, ref clk, and rtc from the 12MHz crystal oscillator
   clock_configure(clk_peri, 0, CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_XOSC_CLKSRC, 12000000, 12000000);
   clock_configure(clk_ref, CLOCKS_CLK_REF_CTRL_SRC_VALUE_XOSC_CLKSRC, 0, 12000000, 12000000);
@@ -356,32 +337,46 @@ int main()
   pll_deinit(pll_usb);
   rosc_disable();
   // Disable more clocks when sleeping
-  clocks_hw->sleep_en0 = CLOCKS_SLEEP_EN0_CLK_SYS_PLL_SYS_BITS;
-  clocks_hw->sleep_en1 = CLOCKS_SLEEP_EN1_CLK_SYS_XOSC_BITS | CLOCKS_SLEEP_EN1_CLK_SYS_TIMER_BITS;
+  clocks_hw->sleep_en0 = 0;
+  clocks_hw->sleep_en1 = CLOCKS_WAKE_EN1_CLK_SYS_TIMER_BITS;
+}
+int main()
+{
+  // Set system clock to 80MHz, this seems like a reasonable value for the 4MHz data
+  set_sys_clock_khz(80000, true);
+  reconfigure_clocks();
 
   // Used for program loading
   int offset;
 
-  // Load and initialize the RX PIO program
-  offset = pio_add_program(pio0, &daisychain_rx_program);
-  daisychain_rx_program_init(pio0, battery_interfaces[0].sm_rx, offset, battery_interfaces[0].serial_in, battery_interfaces[0].serial_master);
-  daisychain_rx_program_init(pio0, battery_interfaces[1].sm_rx, offset, battery_interfaces[1].serial_in, battery_interfaces[1].serial_master);
-
   // Load and initialize the TX PIO program
   offset = pio_add_program(pio0, &daisychain_tx_program);
-  daisychain_tx_program_init(pio0, battery_interfaces[0].sm_tx, offset, battery_interfaces[0].serial_out, battery_interfaces[0].serial_master);
-  daisychain_tx_program_init(pio0, battery_interfaces[1].sm_tx, offset, battery_interfaces[1].serial_out, battery_interfaces[1].serial_master);
+  for(int n=0; n<CHAIN_COUNT; n++)
+    daisychain_tx_program_init(pio0, battery_interfaces[n].sm, offset, battery_interfaces[n].serial_out, battery_interfaces[n].serial_master);
+
+  // Load and initialize the RX PIO program
+  offset = pio_add_program(pio1, &daisychain_rx_program);
+  for(int n=0; n<CHAIN_COUNT; n++)
+  daisychain_rx_program_init(pio1, battery_interfaces[n].sm, offset, battery_interfaces[n].serial_in, battery_interfaces[n].serial_master);
 
   // Configure serial enable pins
-  for(int chain = 0; chain < 2; chain++) {
+  for(int chain = 0; chain < CHAIN_COUNT; chain++) {
     gpio_init(battery_interfaces[chain].serial_enable);
     gpio_set_dir(battery_interfaces[chain].serial_enable, GPIO_OUT);
   }
 
-  gpio_init(CAN_INT);
-  gpio_set_dir(CAN_INT,GPIO_IN);
-  gpio_disable_pulls(CAN_INT);
-  gpio_set_irq_enabled_with_callback(CAN_INT, GPIO_IRQ_LEVEL_LOW, true, &gpio_callback);
+  // Configure hardware wakeup pins
+  gpio_init(WAKE1);
+  gpio_init(WAKE2);
+  gpio_set_dir(WAKE1,GPIO_IN);
+  gpio_set_dir(WAKE2,GPIO_IN);
+  gpio_disable_pulls(WAKE1);
+  gpio_disable_pulls(WAKE2);
+
+  // Configure CAN transceiver sleep line
+  gpio_init(CAN_SLEEP);
+  gpio_set_dir(CAN_SLEEP, GPIO_OUT);
+  gpio_put(CAN_SLEEP, 0); // Logic low to wake transceiver
 
   // Output 8MHz square wave on CAN_CLK pin
   clock_gpio_init(CAN_CLK, CLOCKS_CLK_GPOUT0_CTRL_AUXSRC_VALUE_CLKSRC_PLL_SYS, 10);
@@ -404,18 +399,18 @@ softreset:
     if(rewake) {
       rewake = 0;
       // Wake and reset up the modules
-      wakeup(battery_interfaces + 0);
-      wakeup(battery_interfaces + 1);
+      for(int n=0; n<CHAIN_COUNT; n++)
+        wakeup(battery_interfaces + n);
 
       // Give the modules time to reset
       busy_wait_ms(10);
 
       // Configure the module addresses
-      configure(battery_interfaces + 0);
-      configure(battery_interfaces + 1);
+      for(int n=0; n<CHAIN_COUNT; n++)
+        configure(battery_interfaces + n);
     }
 
-    for(int chain = 0; chain < 2; chain++) {
+    for(int chain = 0; chain < CHAIN_COUNT; chain++) {
       // Set discharge timeout (1min, all modules)
       send_command(battery_interfaces + chain, (uint8_t[]){ 0xF1,0x13,(2<<4) | (1<<3) }, 3);
       // Disable discharge (all modules)
@@ -432,13 +427,13 @@ softreset:
     min_voltage = 65535;
     max_temperature = 0;
     min_temperature = 65535;
-    for(int module = 0; module < 32; module++) {
+    for(int module = 0; module < MAX_MODULES; module++) {
       uint8_t chain = module / 16;
       uint8_t submodule = module % 16;
       if(submodule >= battery_interfaces[chain].module_count) continue;
 
       // Clear the input FIFO just in case
-      pio_sm_clear_fifos(pio0, battery_interfaces[chain].sm_rx);
+      pio_sm_clear_fifos(pio1, battery_interfaces[chain].sm);
       // Request sampled voltage data from module
       send_command(battery_interfaces + chain, (uint8_t[]){0x81,submodule,0x02,0x20}, 4);
       // Receive response data from PIO FIFO into CPU buffer - 51 bytes of data with 10ms timeout
@@ -482,7 +477,7 @@ softreset:
     }
 
     // Balancing
-    for(int module = 0; module < 32; module++) {
+    for(int module = 0; module < MAX_MODULES; module++) {
       uint8_t chain = module / 16;
       uint8_t submodule = module % 16;
       if(submodule >= battery_interfaces[chain].module_count) continue;
@@ -500,26 +495,38 @@ softreset:
     }
 
     // Send general status information to CAN
-    CAN_transmit(0x4f0, (uint8_t[]){ pack_voltage>>24, pack_voltage>>16, pack_voltage>>8, pack_voltage, balance_threshold >> 8, balance_threshold, error_count, battery_interfaces[0].module_count + battery_interfaces[1].module_count }, 8);
+    uint8_t total_module_count = battery_interfaces[0].module_count + battery_interfaces[1].module_count + battery_interfaces[2].module_count;
+    CAN_transmit(0x4f0, (uint8_t[]){ pack_voltage>>24, pack_voltage>>16, pack_voltage>>8, pack_voltage, balance_threshold >> 8, balance_threshold, error_count, total_module_count }, 8);
     CAN_transmit(0x4f1, (uint8_t[]){ max_voltage >> 8, max_voltage, min_voltage >> 8, min_voltage, max_temperature >> 8, max_temperature, min_temperature >> 8, min_temperature }, 8);
 
     if(balance_threshold) {
       // We're balancing, sleep for 1 second only
       sleep_ms(1000);
     } else {
-      // Not balancing, sleep depends on vehicle state
-      if(vehicle_state) {
-        // Vehicle is awake, sleep for 1 second
+      if(gpio_get(WAKE1) || gpio_get(WAKE2)) {
+        // Hardware wakeup is active, sleep 1 second only
         sleep_ms(1000);
       } else {
-        // Put the modules into low power sleep
-        if(balance_threshold == 0) sleep_modules();
-        // Vehicle is asleep, sleep until CAN activity
-        while(!vehicle_state) __wfi();
+        // Sleep until woken by hardware
+        sleep_modules();
+        gpio_put(CAN_SLEEP, 1); // Sleep the CAN transceiver
+        CAN_reg_write(REG_CANCTRL, MODE_SLEEP);
+        uint32_t s = save_and_disable_interrupts();
+        gpio_set_irq_enabled_with_callback(WAKE1, GPIO_IRQ_LEVEL_HIGH, true, &gpio_callback);
+        gpio_set_irq_enabled_with_callback(WAKE2, GPIO_IRQ_LEVEL_HIGH, true, &gpio_callback);
+        gpio_set_dormant_irq_enabled(WAKE1, GPIO_IRQ_LEVEL_HIGH, true);
+        gpio_set_dormant_irq_enabled(WAKE2, GPIO_IRQ_LEVEL_HIGH, true);
+        clocks_hw->sleep_en0 = 0;
+        clocks_hw->sleep_en1 = 0;
+        xosc_dormant();
+        reconfigure_clocks();
+        gpio_set_irq_enabled_with_callback(WAKE1, GPIO_IRQ_LEVEL_HIGH, false, &gpio_callback);
+        gpio_set_irq_enabled_with_callback(WAKE2, GPIO_IRQ_LEVEL_HIGH, false, &gpio_callback);
+        restore_interrupts(s);
+        gpio_put(CAN_SLEEP, 0); // Wake the CAN transceiver
+        CAN_reg_write(REG_CANCTRL, MODE_NORMAL);
+        rewake = 1;
       }
     }
-
-    // If 10 iterations (approx 10 seconds) have passed since the last vehicle status, assume sleep
-    if(cycle_count++ >= 10) vehicle_state = 0;
   }
 }
