@@ -19,12 +19,8 @@
 #define BALANCE_MIN 52428
 
 // The number of active battery interfaces
-#define CHAIN_COUNT 3
+#define CHAIN_COUNT 2
 #define MAX_MODULES (16 * CHAIN_COUNT)
-
-// Hardware wakeup pins
-#define WAKE1 26
-#define WAKE2 27
 
 // Define pins for SPI (to CAN)
 #define SPI_PORT  spi0
@@ -34,7 +30,6 @@
 #define SPI_MOSI  19
 #define CAN_INT   20 // Interrupt from CAN controller
 #define CAN_CLK   21 // 8MHz clock for CAN
-#define CAN_SLEEP 22 // Shut down CAN transceiver
 
 // Struct for RS485 transceiver info
 struct battery_interface {
@@ -47,7 +42,7 @@ struct battery_interface {
 };
 
 // Define pins for RS485 transceivers
-struct battery_interface battery_interfaces[3] = {
+struct battery_interface battery_interfaces[CHAIN_COUNT] = {
   {
     .serial_out    = 2,
     .serial_master = 3,
@@ -55,13 +50,6 @@ struct battery_interface battery_interfaces[3] = {
     .serial_in     = 5,
     .module_count  = 0,
     .sm            = 0,
-  }, {
-    .serial_out    = 6,
-    .serial_master = 7,
-    .serial_enable = 8,
-    .serial_in     = 9,
-    .module_count  = 0,
-    .sm            = 1,
   }, {
     .serial_out    = 10,
     .serial_master = 11,
@@ -77,13 +65,11 @@ uint8_t rx_data_buffer[128];
 
 // Other global variables
 uint8_t error_count = 0;
-uint8_t cycle_count = 0;
 uint16_t balance_threshold = 0;
 uint16_t cell_voltage[MAX_MODULES][16];
 uint16_t aux_voltage[MAX_MODULES][8];
 uint16_t balance_bitmap[MAX_MODULES];
 uint32_t pack_voltage = 0;
-//volatile uint8_t vehicle_state = 0;
 
 // Variables for balancing process and reporting
 uint16_t max_voltage;
@@ -299,20 +285,6 @@ void sample_all() {
   busy_wait_ms(10);
 }
 
-// Put all modules to sleep
-void sleep_modules() {
-  // Broadcast sleep command to each chain
-  for(int n=0; n<CHAIN_COUNT; n++)
-    send_command(battery_interfaces + n, (uint8_t[]){0xF1,0x0C,0x48}, 3);
-  // Wait a little for safety
-  busy_wait_ms(1);
-  // Disable line drivers
-  for(int n=0; n<CHAIN_COUNT; n++)
-    gpio_put(battery_interfaces[n].serial_enable, 1);
-  // Ensure modules are woken when needed again
-  rewake = 1;
-}
-
 // Return 1 if all PCB temperature sensors on a module are above 1.0v
 uint8_t pcb_below_temp(uint8_t module) {
   if(aux_voltage[module][3] < 13107) return 0;
@@ -321,9 +293,6 @@ uint8_t pcb_below_temp(uint8_t module) {
   if(aux_voltage[module][6] < 13107) return 0;
   return 1;
 }
-
-// Dummy interrupt for hardware wakeup
-void gpio_callback() {}
 
 void reconfigure_clocks() {
   // Clock the peripherals, ref clk, and rtc from the 12MHz crystal oscillator
@@ -364,19 +333,6 @@ int main()
     gpio_init(battery_interfaces[chain].serial_enable);
     gpio_set_dir(battery_interfaces[chain].serial_enable, GPIO_OUT);
   }
-
-  // Configure hardware wakeup pins
-  gpio_init(WAKE1);
-  gpio_init(WAKE2);
-  gpio_set_dir(WAKE1,GPIO_IN);
-  gpio_set_dir(WAKE2,GPIO_IN);
-  gpio_disable_pulls(WAKE1);
-  gpio_disable_pulls(WAKE2);
-
-  // Configure CAN transceiver sleep line
-  gpio_init(CAN_SLEEP);
-  gpio_set_dir(CAN_SLEEP, GPIO_OUT);
-  gpio_put(CAN_SLEEP, 0); // Logic low to wake transceiver
 
   // Output 8MHz square wave on CAN_CLK pin
   clock_gpio_init(CAN_CLK, CLOCKS_CLK_GPOUT0_CTRL_AUXSRC_VALUE_CLKSRC_PLL_SYS, 10);
@@ -499,34 +455,6 @@ softreset:
     CAN_transmit(0x4f0, (uint8_t[]){ pack_voltage>>24, pack_voltage>>16, pack_voltage>>8, pack_voltage, balance_threshold >> 8, balance_threshold, error_count, total_module_count }, 8);
     CAN_transmit(0x4f1, (uint8_t[]){ max_voltage >> 8, max_voltage, min_voltage >> 8, min_voltage, max_temperature >> 8, max_temperature, min_temperature >> 8, min_temperature }, 8);
 
-    if(balance_threshold) {
-      // We're balancing, sleep for 1 second only
-      sleep_ms(1000);
-    } else {
-      if(gpio_get(WAKE1) || gpio_get(WAKE2)) {
-        // Hardware wakeup is active, sleep 1 second only
-        sleep_ms(1000);
-      } else {
-        // Sleep until woken by hardware
-        sleep_modules();
-        gpio_put(CAN_SLEEP, 1); // Sleep the CAN transceiver
-        CAN_reg_write(REG_CANCTRL, MODE_SLEEP);
-        uint32_t s = save_and_disable_interrupts();
-        gpio_set_irq_enabled_with_callback(WAKE1, GPIO_IRQ_LEVEL_HIGH, true, &gpio_callback);
-        gpio_set_irq_enabled_with_callback(WAKE2, GPIO_IRQ_LEVEL_HIGH, true, &gpio_callback);
-        gpio_set_dormant_irq_enabled(WAKE1, GPIO_IRQ_LEVEL_HIGH, true);
-        gpio_set_dormant_irq_enabled(WAKE2, GPIO_IRQ_LEVEL_HIGH, true);
-        clocks_hw->sleep_en0 = 0;
-        clocks_hw->sleep_en1 = 0;
-        xosc_dormant();
-        reconfigure_clocks();
-        gpio_set_irq_enabled_with_callback(WAKE1, GPIO_IRQ_LEVEL_HIGH, false, &gpio_callback);
-        gpio_set_irq_enabled_with_callback(WAKE2, GPIO_IRQ_LEVEL_HIGH, false, &gpio_callback);
-        restore_interrupts(s);
-        gpio_put(CAN_SLEEP, 0); // Wake the CAN transceiver
-        CAN_reg_write(REG_CANCTRL, MODE_NORMAL);
-        rewake = 1;
-      }
-    }
+    sleep_ms(2000);
   }
 }
