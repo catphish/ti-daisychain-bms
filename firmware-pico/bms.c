@@ -377,6 +377,10 @@ softreset:
     // Send a broadcast message to all modules in chain to simultaneously sample all cells
     sample_all();
 
+    // Count modules
+    uint8_t total_module_count = 0;
+    for(int n=0; n<CHAIN_COUNT;n++) total_module_count+= battery_interfaces[n].module_count;
+
     // Collect voltages and temperature data for all modules
     // We want to complete this loop as fast as possible because balancing must be disabled during measurement
     max_voltage = 0;
@@ -451,7 +455,6 @@ softreset:
     }
 
     // Send general status information to CAN
-    uint8_t total_module_count = battery_interfaces[0].module_count + battery_interfaces[1].module_count + battery_interfaces[2].module_count;
     CAN_transmit(0x4f0, (uint8_t[]){ pack_voltage>>24, pack_voltage>>16, pack_voltage>>8, pack_voltage, balance_threshold >> 8, balance_threshold, error_count, total_module_count }, 8);
     CAN_transmit(0x4f1, (uint8_t[]){ max_voltage >> 8, max_voltage, min_voltage >> 8, min_voltage, max_temperature >> 8, max_temperature, min_temperature >> 8, min_temperature }, 8);
 
