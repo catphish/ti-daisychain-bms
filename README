@@ -3,4 +3,99 @@ TI Daisychain BMS Master
 
 BMS master for daisychained bq76PL455A slave modules.
 
-New README for v3 coming soon!
+This board will communicate with up to 3 strings of bq76PL455A battery
+modules. Each string supports up to 16 modules, and each module supports
+up to 16 cells. A common configuration is 3 strings of 6 modules but any
+combination is supported.
+
+The board will read the voltages of all detected cells and will perform
+balancing as well as reporting data over CAN.
+
+Connector J1
+=============
+
+------------------------
+| CANH | WAKE1 | WAKE2 |
+| CANL |  GND  |  +12V |
+------------------------
+
+The low voltage connector J1 has 3 functions:
+
+1) Connect +12v to a permanent positive suppy (5v - 14v)
+2) Connect CANH and CANL to a CAN bus.
+3) Connect WAKE1 and WAKE2 to switched voltage sources
+
+If either WAKE1 OR WAKE2 is live (+5v to +14v) theh the board will wake
+up and monitor the pack. If both are off (0v) then the board will finish
+any in-progress balancing, then go into a low power sleep mode.
+
+Connector J2, J3, J4
+====================
+
+Each of the BATT1, BATT2 and BATT3 (J2,J3,J4) may be connected to the data
+pins of a bq76PL455A battery module. All three are optional, and all three
+support a full chain of up to 16 battery modules, or any partial chain.
+Chain lengths do not have to be matched. The pinout of the battery module
+is beyong the scope of this document.
+
+Power Modes
+===========
+
+When either WAKE1 or WAKE2 are high, the module will enter active mode. In
+this mode, it will continuously monitor the voltage of all attached cells.
+Data including the pack voltage, high and low cell voltages, and temperatures
+will be send to the CAN bus at 1 second intervals. Balancing will take place
+if necessary. For further details of balancing see the next section.
+
+When WAKE1 and WAKE2 are both low, and balancing is complete, the board will
+enter a low power sleep mode. In this mode, the board consumes approximately
+600uA (0.6mA) at 12V and will perform no actions until woken again. The
+bq76PL455A modules will also anter a low power state, consuming close to zero
+power from the high voltage pack.
+
+Balancing
+=========
+
+If any cell voltage is detected as being higher than 4.0V and more than 10mV
+higher than the lowest recorded cell voltage, it will be bled until one of
+these ocnditions is no longer met. To prevent excessive heat, only one cell
+in each battery (16 cell module) will be bled simultaneously. If multiple cells
+meet the criteria, the cell with the highest voltage will be selected.
+Balancing will be considered complete when no cells meet the criteria for
+balancing.
+
+CAN Messages Received
+=====================
+
+This modules does not receive CAN messages.
+
+CAN Messages Sent
+=================
+
+--------------------------------------------------------------------------------
+| CAN ID | Byte 0-3           | Byte 4-5          | Byte 6      | Byte 7       |
+| 0x4f0  | Total Pack Voltage | Balance Threshold | Error count | Module count |
+--------------------------------------------------------------------------------
+
+Total pack voltage it the sum of all modules. For parallel packs this value
+will be a multiple of the real pack voltage.
+
+Balance threshold will be a non-zero value when balancing is active and
+indicates the target voltage, generally this will be 10mV higher than the
+minimum cell voltage.
+
+--------------------------------------------------------------------
+| CAN ID | Byte 0-1   | Byte 2-3   | Byte 4-5      | Byte 6-7      |
+| 0x4f1  | Max Cell V | Min Cell V | Max Cell Temp | Min Cell Temp |
+--------------------------------------------------------------------
+
+All values are big endian. Voltage values should be interpreted by dividing
+the value by 13107. Temperature values are 
+
+The following calculation can be used to convert the readong for an External NTC to a temperature:
+
+float temperature(uint16_t adc) {
+  float r = 0.0000000347363427499292f * adc * adc - 0.001025770762903f * adc + 2.68235340614337f;
+  float t = log(r) * -30.5280964239816f + 95.6841501312447f;
+  return t;
+}
