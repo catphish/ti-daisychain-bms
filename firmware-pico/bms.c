@@ -313,7 +313,9 @@ int main()
 {
   // Set system clock to 80MHz, this seems like a reasonable value for the 4MHz data
   set_sys_clock_khz(80000, true);
-  reconfigure_clocks();
+//  reconfigure_clocks();
+
+  stdio_init_all();
 
   // Used for program loading
   int offset;
@@ -452,7 +454,13 @@ softreset:
                 max_v = cell_voltage[module][cell];
               }
       send_command(battery_interfaces + chain, (uint8_t[]){ 0x92,submodule,0x14,balance_bitmap[module] >> 8, balance_bitmap[module] }, 5);
+
+      for(int cell=0; cell<16; cell++) {
+        float v = cell_voltage[module][cell] / 13107.f;
+        printf("Module %i Cell %i Voltage: %.4f\n", module, cell, v);
+      }
     }
+    printf("\n");
 
     // Send general status information to CAN
     CAN_transmit(0x4f0, (uint8_t[]){ pack_voltage>>24, pack_voltage>>16, pack_voltage>>8, pack_voltage, balance_threshold >> 8, balance_threshold, error_count, total_module_count }, 8);
