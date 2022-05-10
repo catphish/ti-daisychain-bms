@@ -439,8 +439,9 @@ softreset:
       // Receive response data from PIO FIFO into CPU buffer - 51 bytes of data with 10ms timeout
       // 24 values * 2 bytes + length + 2 byte checksum = 51
       uint16_t received = receive_data(battery_interfaces + chain, rx_data_buffer, 51, 10000);
-      // TODO: check RX CRC here
-      if(received == 51) {
+      // Check RX CRC
+      uint16_t rx_crc = crc16(rx_data_buffer, 49);
+      if(received == 51 && (rx_crc & 0xFF) == rx_data_buffer[49] && (rx_crc >> 8) == rx_data_buffer[50] ) {
         for(int cell=0; cell<16; cell++) {
           // nb. Cells are in reverse, cell 16 is reported first
           cell_voltage[module][cell] = rx_data_buffer[(15-cell)*2+1] << 8 | rx_data_buffer[(15-cell)*2+2];
