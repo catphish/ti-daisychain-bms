@@ -309,6 +309,13 @@ void reconfigure_clocks() {
   clocks_hw->sleep_en0 = 0;
   clocks_hw->sleep_en1 = CLOCKS_WAKE_EN1_CLK_SYS_TIMER_BITS;
 }
+
+float temperature(uint16_t adc) {
+  float r = 0.0000000347363427499292f * adc * adc - 0.001025770762903f * adc + 2.68235340614337f;
+  float t = log(r) * -30.5280964239816f + 95.6841501312447f;
+  return t;
+}
+
 int main()
 {
   // Set system clock to 80MHz, this seems like a reasonable value for the 4MHz data
@@ -368,6 +375,9 @@ softreset:
         configure(battery_interfaces + n);
     }
 
+    battery_interfaces[0].module_count = 6;
+    battery_interfaces[1].module_count = 0;
+  
     for(int chain = 0; chain < CHAIN_COUNT; chain++) {
       // Set discharge timeout (1min, all modules)
       send_command(battery_interfaces + chain, (uint8_t[]){ 0xF1,0x13,(2<<4) | (1<<3) }, 3);
@@ -387,8 +397,8 @@ softreset:
     // We want to complete this loop as fast as possible because balancing must be disabled during measurement
     max_voltage = 0;
     min_voltage = 65535;
-    max_temperature = 0;
-    min_temperature = 65535;
+    max_temperature = 65535;
+    min_temperature = 0;
     for(int module = 0; module < MAX_MODULES; module++) {
       uint8_t chain = module / 16;
       uint8_t submodule = module % 16;
@@ -401,8 +411,9 @@ softreset:
       // Receive response data from PIO FIFO into CPU buffer - 51 bytes of data with 10ms timeout
       // 24 values * 2 bytes + length + 2 byte checksum = 51
       uint16_t received = receive_data(battery_interfaces + chain, rx_data_buffer, 51, 10000);
-      // TODO: check RX CRC here
-      if(received == 51) {
+      // Check RX CRC
+      uint16_t rx_crc = crc16(rx_data_buffer, 49);
+      if(received == 51 && (rx_crc & 0xFF) == rx_data_buffer[49] && (rx_crc >> 8) == rx_data_buffer[50] ) {
         for(int cell=0; cell<16; cell++) {
           // nb. Cells are in reverse, cell 16 is reported first
           cell_voltage[module][cell] = rx_data_buffer[(15-cell)*2+1] << 8 | rx_data_buffer[(15-cell)*2+2];
@@ -414,11 +425,14 @@ softreset:
           aux_voltage[module][aux] = rx_data_buffer[(16+aux)*2+1] << 8 | rx_data_buffer[(16+aux)*2+2];
         }
         for(int aux=1; aux<3; aux++) {
-          if(aux_voltage[module][aux] > max_temperature) max_temperature = aux_voltage[module][aux];
-          if(aux_voltage[module][aux] < min_temperature) min_temperature = aux_voltage[module][aux];
+          // Higher temperatures mean lower values!
+          if(aux_voltage[module][aux] < max_temperature) max_temperature = aux_voltage[module][aux];
+          if(aux_voltage[module][aux] > min_temperature) min_temperature = aux_voltage[module][aux];
         }
       } else {
         error_count++;
+        printf("RESET!\n");
+        busy_wait_ms(1000);
         goto softreset;
       }
     }
@@ -458,8 +472,11 @@ softreset:
       for(int cell=0; cell<16; cell++) {
         float v = cell_voltage[module][cell] / 13107.f;
         printf("Module %i Cell %i Voltage: %.4f\n", module, cell, v);
+        busy_wait_ms(1);
       }
     }
+    printf("Min Temp: %.1fC\n", temperature(min_temperature));
+    printf("Max Temp: %.1fC\n", temperature(max_temperature));
     printf("\n");
 
     // Send general status information to CAN
