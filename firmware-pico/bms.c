@@ -340,6 +340,7 @@ void reconfigure_clocks() {
   clocks_hw->sleep_en0 = 0;
   clocks_hw->sleep_en1 = CLOCKS_WAKE_EN1_CLK_SYS_TIMER_BITS;
 }
+
 int main()
 {
   // Set system clock to 80MHz, this seems like a reasonable value for the 4MHz data
