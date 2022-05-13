@@ -14,7 +14,7 @@ pico_generate_pio_header(bms ${CMAKE_CURRENT_LIST_DIR}/bms.pio)
 target_sources(bms PRIVATE bms.c)
 target_link_libraries(bms PRIVATE pico_stdlib hardware_pio hardware_spi hardware_sleep)
 
-#pico_enable_stdio_usb(bms 1)
+pico_enable_stdio_usb(bms 1)
 #pico_enable_stdio_uart(bms 0)
 
 pico_add_extra_outputs(bms)

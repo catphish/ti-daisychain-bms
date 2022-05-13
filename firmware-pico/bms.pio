@@ -39,26 +39,25 @@ static inline void daisychain_tx_program_init(PIO pio, uint sm, uint offset, uin
 .program daisychain_rx
 .wrap_target
 beginning:
-  wait 0 pin 0          // Wait for data input to go low
-  jmp pin beginning     // Loop back to igore the data if we're transmitting
-  nop              [9]  // Skip the first bit
-  set y, 7              // Loop counter
+  wait 0 pin 0       // Wait for data input to go low
+  jmp pin beginning  // Loop back to igore the data if we're transmitting
+  mov x, !pins       // Read the start bit again (inverted)
+  jmp !x beginning   // Restart if start went high too early
+  nop            [5] // Delay 6 cycles (nop + 5 more)
+  set y, 7           // Initialize loop counter
 bitloop:
-  mov x, pins           // Read a bit (low-high is a binary 0 and we're reading the first half)
-  in x, 1          [7]  // Put the bit into the ISR
-  jmp y-- bitloop       // Loop 8 bits
+  in pins, 1         // Read the bit into the ISR
+  nop            [7] // Delay 8 cycles for a total loop length of 10
+  jmp y-- bitloop    // Loop 8 times
 
-  mov x, !pins          // Read the framing bit and invert it, no need to invert this one
-  in x, 1               // Put the framing bit into the ISR
-  in null, 23           // Dump 23 bits of zero into the ISR to align things
-  push noblock          // Push to FIFO
+  in null, 24        // Dump 24 bits of zero into the ISR to right align the byte
+  push noblock   [3] // Push to FIFO, delay 3 more cycles to fully skip first half of framing bit
 .wrap
 
 % c-sdk {
 static inline void daisychain_rx_program_init(PIO pio, uint sm, uint offset, uint datapin, uint enablepin) {
     pio_sm_set_consecutive_pindirs(pio, sm, datapin, 1, false);
     pio_gpio_init(pio, datapin);
-
     pio_sm_config c = daisychain_rx_program_get_default_config(offset);
     sm_config_set_in_pins(&c, datapin);
     sm_config_set_jmp_pin(&c, enablepin);

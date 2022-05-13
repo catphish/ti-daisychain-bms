@@ -13,6 +13,8 @@
 #include "can.h"
 #include <math.h>
 
+#define USB_MODE
+
 // Min difference to enable balancing. 131 = 10mV
 #define BALANCE_DIFF 131
 // Min absolute voltage to enable balancing. 52428 = 4.0V, 53738 = 4.1V, 54525 = 4.16V
@@ -53,7 +55,7 @@ struct battery_interface battery_interfaces[3] = {
     .serial_master = 3,
     .serial_enable = 4,
     .serial_in     = 5,
-    .module_count  = 0,
+    .module_count  = 1,
     .sm            = 0,
   }, {
     .serial_out    = 6,
@@ -77,13 +79,11 @@ uint8_t rx_data_buffer[128];
 
 // Other global variables
 uint8_t error_count = 0;
-uint8_t cycle_count = 0;
 uint16_t balance_threshold = 0;
 uint16_t cell_voltage[MAX_MODULES][16];
 uint16_t aux_voltage[MAX_MODULES][8];
 uint16_t balance_bitmap[MAX_MODULES];
 uint32_t pack_voltage = 0;
-//volatile uint8_t vehicle_state = 0;
 
 // Variables for balancing process and reporting
 uint16_t max_voltage;
@@ -210,15 +210,15 @@ void wakeup(struct battery_interface * battery_interface) {
   pio_sm_set_enabled(pio0, battery_interface->sm, false);
   // Wait for it to be disabled
   busy_wait_ms(1);
-  // Loop for 200 x 10us = 2ms
-  for(int n=0; n<200; n++) {
+  // Loop for 100 x 10us
+  for(int n=0; n<100; n++) {
     pio_sm_set_pins(pio0, battery_interface->sm, (1 << battery_interface->serial_master) | (1 << battery_interface->serial_out)); // Drive DO high (DE enabled)
-    busy_wait_us(4);
+    busy_wait_us(2);
     pio_sm_set_pins(pio0, battery_interface->sm, (1 << battery_interface->serial_master) | (0 << battery_interface->serial_out)); // Drive DO low (DE enabled)
-    busy_wait_us(4);
+    busy_wait_us(2);
   }
   pio_sm_set_pins(pio0, battery_interface->sm, (1 << battery_interface->serial_master) | (1 << battery_interface->serial_out)); // Drive DO high (DE enabled)
-  busy_wait_us(4);
+  busy_wait_us(2);
   // Disable DE, stop driving bus
   pio_sm_set_pins(pio0, battery_interface->sm, 0);
   // Re-enable TX PIO
@@ -275,17 +275,8 @@ void configure(struct battery_interface * battery_interface) {
   }
   for(int n=0; n<16; n++) {
     // Attempt to read back the address from each device
-    pio_sm_clear_fifos(pio1, battery_interface->sm);
     send_command(battery_interface, (uint8_t[]){0x81,n,0x0A,0x00}, 4);
-    uint16_t received = receive_data(battery_interface, rx_data_buffer, 4, 10000);
-    // If we don't receive a response, assume there are no more modules
-    // and return the number of modules successfully found.
-    if(received != 4) {
-      battery_interface->module_count = n;
-      return;
-    }
   }
-  battery_interface->module_count = 16;
 }
 
 // Request that all packs simultaneously sample voltage
@@ -345,8 +336,11 @@ int main()
 {
   // Set system clock to 80MHz, this seems like a reasonable value for the 4MHz data
   set_sys_clock_khz(80000, true);
-  reconfigure_clocks();
-
+  #ifdef USB_MODE
+      stdio_init_all();
+  #else
+    reconfigure_clocks();
+  #endif
   // Used for program loading
   int offset;
 
@@ -358,7 +352,7 @@ int main()
   // Load and initialize the RX PIO program
   offset = pio_add_program(pio1, &daisychain_rx_program);
   for(int n=0; n<CHAIN_COUNT; n++)
-  daisychain_rx_program_init(pio1, battery_interfaces[n].sm, offset, battery_interfaces[n].serial_in, battery_interfaces[n].serial_master);
+    daisychain_rx_program_init(pio1, battery_interfaces[n].sm, offset, battery_interfaces[n].serial_in, battery_interfaces[n].serial_master);
 
   // Configure serial enable pins
   for(int chain = 0; chain < CHAIN_COUNT; chain++) {
@@ -426,8 +420,8 @@ softreset:
     // We want to complete this loop as fast as possible because balancing must be disabled during measurement
     max_voltage = 0;
     min_voltage = 65535;
-    max_temperature = 0;
-    min_temperature = 65535;
+    max_temperature = 65535;
+    min_temperature = 0;
     for(int module = 0; module < MAX_MODULES; module++) {
       uint8_t chain = module / 16;
       uint8_t submodule = module % 16;
@@ -454,11 +448,16 @@ softreset:
           aux_voltage[module][aux] = rx_data_buffer[(16+aux)*2+1] << 8 | rx_data_buffer[(16+aux)*2+2];
         }
         for(int aux=1; aux<3; aux++) {
-          if(aux_voltage[module][aux] > max_temperature) max_temperature = aux_voltage[module][aux];
-          if(aux_voltage[module][aux] < min_temperature) min_temperature = aux_voltage[module][aux];
+          // Higher temperatures mean lower values!
+          if(aux_voltage[module][aux] < max_temperature) max_temperature = aux_voltage[module][aux];
+          if(aux_voltage[module][aux] > min_temperature) min_temperature = aux_voltage[module][aux];
         }
       } else {
+        #ifdef USB_MODE
+          printf("Error!\n");
+        #endif
         error_count++;
+        sleep_ms(1000);
         goto softreset;
       }
     }
@@ -494,6 +493,12 @@ softreset:
                 max_v = cell_voltage[module][cell];
               }
       send_command(battery_interfaces + chain, (uint8_t[]){ 0x92,submodule,0x14,balance_bitmap[module] >> 8, balance_bitmap[module] }, 5);
+      #ifdef USB_MODE
+        for(int cell=0; cell<16; cell++) {
+          float v = cell_voltage[module][cell] / 13107.f;
+          printf("Module %i Cell %i Voltage: %.4f\n", module, cell, v);
+        }
+      #endif
     }
 
     // Send general status information to CAN
@@ -501,34 +506,38 @@ softreset:
     CAN_transmit(0x4f0, (uint8_t[]){ pack_voltage>>24, pack_voltage>>16, pack_voltage>>8, pack_voltage, balance_threshold >> 8, balance_threshold, error_count, total_module_count }, 8);
     CAN_transmit(0x4f1, (uint8_t[]){ max_voltage >> 8, max_voltage, min_voltage >> 8, min_voltage, max_temperature >> 8, max_temperature, min_temperature >> 8, min_temperature }, 8);
 
-    if(balance_threshold) {
-      // We're balancing, sleep for 1 second only
+    #ifdef USB_MODE
       sleep_ms(1000);
-    } else {
-      if(gpio_get(WAKE1) || gpio_get(WAKE2)) {
-        // Hardware wakeup is active, sleep 1 second only
+    #else
+      if(balance_threshold) {
+        // We're balancing, sleep for 1 second only
         sleep_ms(1000);
       } else {
-        // Sleep until woken by hardware
-        sleep_modules();
-        gpio_put(CAN_SLEEP, 1); // Sleep the CAN transceiver
-        CAN_reg_write(REG_CANCTRL, MODE_SLEEP);
-        uint32_t s = save_and_disable_interrupts();
-        gpio_set_irq_enabled_with_callback(WAKE1, GPIO_IRQ_LEVEL_HIGH, true, &gpio_callback);
-        gpio_set_irq_enabled_with_callback(WAKE2, GPIO_IRQ_LEVEL_HIGH, true, &gpio_callback);
-        gpio_set_dormant_irq_enabled(WAKE1, GPIO_IRQ_LEVEL_HIGH, true);
-        gpio_set_dormant_irq_enabled(WAKE2, GPIO_IRQ_LEVEL_HIGH, true);
-        clocks_hw->sleep_en0 = 0;
-        clocks_hw->sleep_en1 = 0;
-        xosc_dormant();
-        reconfigure_clocks();
-        gpio_set_irq_enabled_with_callback(WAKE1, GPIO_IRQ_LEVEL_HIGH, false, &gpio_callback);
-        gpio_set_irq_enabled_with_callback(WAKE2, GPIO_IRQ_LEVEL_HIGH, false, &gpio_callback);
-        restore_interrupts(s);
-        gpio_put(CAN_SLEEP, 0); // Wake the CAN transceiver
-        CAN_reg_write(REG_CANCTRL, MODE_NORMAL);
-        rewake = 1;
+        if(gpio_get(WAKE1) || gpio_get(WAKE2)) {
+          // Hardware wakeup is active, sleep 1 second only
+          sleep_ms(1000);
+        } else {
+          // Sleep until woken by hardware
+          sleep_modules();
+          gpio_put(CAN_SLEEP, 1); // Sleep the CAN transceiver
+          CAN_reg_write(REG_CANCTRL, MODE_SLEEP);
+          uint32_t s = save_and_disable_interrupts();
+          gpio_set_irq_enabled_with_callback(WAKE1, GPIO_IRQ_LEVEL_HIGH, true, &gpio_callback);
+          gpio_set_irq_enabled_with_callback(WAKE2, GPIO_IRQ_LEVEL_HIGH, true, &gpio_callback);
+          gpio_set_dormant_irq_enabled(WAKE1, GPIO_IRQ_LEVEL_HIGH, true);
+          gpio_set_dormant_irq_enabled(WAKE2, GPIO_IRQ_LEVEL_HIGH, true);
+          clocks_hw->sleep_en0 = 0;
+          clocks_hw->sleep_en1 = 0;
+          xosc_dormant();
+          reconfigure_clocks();
+          gpio_set_irq_enabled_with_callback(WAKE1, GPIO_IRQ_LEVEL_HIGH, false, &gpio_callback);
+          gpio_set_irq_enabled_with_callback(WAKE2, GPIO_IRQ_LEVEL_HIGH, false, &gpio_callback);
+          restore_interrupts(s);
+          gpio_put(CAN_SLEEP, 0); // Wake the CAN transceiver
+          CAN_reg_write(REG_CANCTRL, MODE_NORMAL);
+          rewake = 1;
+        }
       }
-    }
+    #endif
   }
 }
