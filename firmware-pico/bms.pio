@@ -18,14 +18,14 @@ bitloop:
 .wrap
 
 % c-sdk {
-static inline void daisychain_tx_program_init(PIO pio, uint sm, uint offset, uint datapin, uint enablepin) {
+static inline void daisychain_tx_program_init(PIO pio, uint sm, uint offset, uint datapin, uint masterpin) {
     pio_sm_set_consecutive_pindirs(pio, sm, datapin, 1, true);
-    pio_sm_set_consecutive_pindirs(pio, sm, enablepin, 1, true);
+    pio_sm_set_consecutive_pindirs(pio, sm, masterpin, 1, true);
     pio_gpio_init(pio, datapin);
-    pio_gpio_init(pio, enablepin);
+    pio_gpio_init(pio, masterpin);
 
     pio_sm_config c = daisychain_tx_program_get_default_config(offset);
-    sm_config_set_sideset_pins(&c, enablepin);
+    sm_config_set_sideset_pins(&c, masterpin);
     sm_config_set_out_pins(&c, datapin, 1);
     sm_config_set_out_shift(&c, true, false, 9);
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
@@ -40,10 +40,8 @@ static inline void daisychain_tx_program_init(PIO pio, uint sm, uint offset, uin
 .wrap_target
 beginning:
   wait 0 pin 0       // Wait for data input to go low
-  jmp pin beginning  // Loop back to igore the data if we're transmitting
-  mov x, !pins       // Read the start bit again (inverted)
-  jmp !x beginning   // Restart if start went high too early
-  nop            [5] // Delay 6 cycles (nop + 5 more)
+  jmp pin beginning  // Start over if we're transmitting
+  nop            [7] // Delay 8 cycles (nop + 7 more)
   set y, 7           // Initialize loop counter
 bitloop:
   in pins, 1         // Read the bit into the ISR
@@ -55,13 +53,13 @@ bitloop:
 .wrap
 
 % c-sdk {
-static inline void daisychain_rx_program_init(PIO pio, uint sm, uint offset, uint datapin, uint enablepin) {
+static inline void daisychain_rx_program_init(PIO pio, uint sm, uint offset, uint datapin, uint masterpin) {
     pio_sm_set_consecutive_pindirs(pio, sm, datapin, 1, false);
     pio_gpio_init(pio, datapin);
     pio_sm_config c = daisychain_rx_program_get_default_config(offset);
     sm_config_set_in_pins(&c, datapin);
-    sm_config_set_jmp_pin(&c, enablepin);
-    sm_config_set_in_shift(&c, true, false, 9);
+    sm_config_set_jmp_pin(&c, masterpin);
+    sm_config_set_in_shift(&c, true, false, 8);
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
     sm_config_set_clkdiv(&c, 2);
     pio_sm_init(pio, sm, offset, &c);
