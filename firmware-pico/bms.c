@@ -13,7 +13,7 @@
 #include "can.h"
 #include <math.h>
 
-#define USB_MODE
+//#define USB_MODE
 
 // Min difference to enable balancing. 131 = 10mV
 #define BALANCE_DIFF 131
@@ -323,13 +323,33 @@ void reconfigure_clocks() {
   clock_configure(clk_rtc, 0, CLOCKS_CLK_RTC_CTRL_AUXSRC_VALUE_XOSC_CLKSRC, 12000000, 46875);
   // Shut down unused clocks, PLLs and oscillators
   clock_stop(clk_usb);
-  clock_stop(clk_usb);
   clock_stop(clk_adc);
   pll_deinit(pll_usb);
   rosc_disable();
   // Disable more clocks when sleeping
   clocks_hw->sleep_en0 = 0;
   clocks_hw->sleep_en1 = CLOCKS_WAKE_EN1_CLK_SYS_TIMER_BITS;
+}
+
+void deep_sleep() {
+  // Deep sleep until woken by hardware
+  CAN_reg_write(REG_CANCTRL, MODE_SLEEP);
+  gpio_put(CAN_SLEEP, 1); // Sleep the CAN transceiver
+  uint32_t s = save_and_disable_interrupts();
+  gpio_set_irq_enabled_with_callback(WAKE1, GPIO_IRQ_LEVEL_HIGH, true, &gpio_callback);
+  gpio_set_irq_enabled_with_callback(WAKE2, GPIO_IRQ_LEVEL_HIGH, true, &gpio_callback);
+  gpio_set_dormant_irq_enabled(WAKE1, GPIO_IRQ_LEVEL_HIGH, true);
+  gpio_set_dormant_irq_enabled(WAKE2, GPIO_IRQ_LEVEL_HIGH, true);
+  clocks_hw->sleep_en0 = 0;
+  clocks_hw->sleep_en1 = 0;
+  xosc_dormant();
+  reconfigure_clocks();
+  gpio_set_irq_enabled_with_callback(WAKE1, GPIO_IRQ_LEVEL_HIGH, false, &gpio_callback);
+  gpio_set_irq_enabled_with_callback(WAKE2, GPIO_IRQ_LEVEL_HIGH, false, &gpio_callback);
+  restore_interrupts(s);
+  SPI_configure();
+  gpio_put(CAN_SLEEP, 0); // Wake the CAN transceiver
+  CAN_reg_write(REG_CANCTRL, MODE_NORMAL);
 }
 
 int main()
@@ -382,7 +402,6 @@ int main()
   CAN_reset();
   CAN_configure(0x4F8);
 
-softreset:
   // Wake modules immediately
   rewake = 1;
   // Main loop.
@@ -453,11 +472,10 @@ softreset:
           if(aux_voltage[module][aux] > min_temperature) min_temperature = aux_voltage[module][aux];
         }
       } else {
-        #ifdef USB_MODE
-          printf("Error!\n");
-        #endif
+        printf("Error!\n");
         error_count++;
-        sleep_ms(1000);
+        rewake = 1;
+        balance_threshold = 0;
         goto softreset;
       }
     }
@@ -493,12 +511,10 @@ softreset:
                 max_v = cell_voltage[module][cell];
               }
       send_command(battery_interfaces + chain, (uint8_t[]){ 0x92,submodule,0x14,balance_bitmap[module] >> 8, balance_bitmap[module] }, 5);
-      #ifdef USB_MODE
-        for(int cell=0; cell<16; cell++) {
-          float v = cell_voltage[module][cell] / 13107.f;
-          printf("Module %i Cell %i Voltage: %.4f\n", module, cell, v);
-        }
-      #endif
+      for(int cell=0; cell<16; cell++) {
+        float v = cell_voltage[module][cell] / 13107.f;
+        printf("Module %i Cell %i Voltage: %.4f\n", module, cell, v);
+      }
     }
 
     // Send general status information to CAN
@@ -506,37 +522,15 @@ softreset:
     CAN_transmit(0x4f0, (uint8_t[]){ pack_voltage>>24, pack_voltage>>16, pack_voltage>>8, pack_voltage, balance_threshold >> 8, balance_threshold, error_count, total_module_count }, 8);
     CAN_transmit(0x4f1, (uint8_t[]){ max_voltage >> 8, max_voltage, min_voltage >> 8, min_voltage, max_temperature >> 8, max_temperature, min_temperature >> 8, min_temperature }, 8);
 
-    #ifdef USB_MODE
-      sleep_ms(1000);
-    #else
-      if(balance_threshold) {
-        // We're balancing, sleep for 1 second only
-        sleep_ms(1000);
-      } else {
-        if(gpio_get(WAKE1) || gpio_get(WAKE2)) {
-          // Hardware wakeup is active, sleep 1 second only
-          sleep_ms(1000);
-        } else {
-          // Sleep until woken by hardware
-          sleep_modules();
-          gpio_put(CAN_SLEEP, 1); // Sleep the CAN transceiver
-          CAN_reg_write(REG_CANCTRL, MODE_SLEEP);
-          uint32_t s = save_and_disable_interrupts();
-          gpio_set_irq_enabled_with_callback(WAKE1, GPIO_IRQ_LEVEL_HIGH, true, &gpio_callback);
-          gpio_set_irq_enabled_with_callback(WAKE2, GPIO_IRQ_LEVEL_HIGH, true, &gpio_callback);
-          gpio_set_dormant_irq_enabled(WAKE1, GPIO_IRQ_LEVEL_HIGH, true);
-          gpio_set_dormant_irq_enabled(WAKE2, GPIO_IRQ_LEVEL_HIGH, true);
-          clocks_hw->sleep_en0 = 0;
-          clocks_hw->sleep_en1 = 0;
-          xosc_dormant();
-          reconfigure_clocks();
-          gpio_set_irq_enabled_with_callback(WAKE1, GPIO_IRQ_LEVEL_HIGH, false, &gpio_callback);
-          gpio_set_irq_enabled_with_callback(WAKE2, GPIO_IRQ_LEVEL_HIGH, false, &gpio_callback);
-          restore_interrupts(s);
-          gpio_put(CAN_SLEEP, 0); // Wake the CAN transceiver
-          CAN_reg_write(REG_CANCTRL, MODE_NORMAL);
-          rewake = 1;
-        }
+softreset:
+    // Sleep for a minimum of 1 second per loop
+    sleep_ms(1000);
+    #ifndef USB_MODE
+      if(!balance_threshold && !gpio_get(WAKE1) && !gpio_get(WAKE2)) {
+        // Sleep until woken by hardware
+        sleep_modules();
+        deep_sleep();
+        rewake = 1;
       }
     #endif
   }
