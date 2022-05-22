@@ -331,6 +331,12 @@ void reconfigure_clocks() {
   clocks_hw->sleep_en1 = CLOCKS_WAKE_EN1_CLK_SYS_TIMER_BITS;
 }
 
+float temperature(uint16_t adc) {
+  float r = 0.0000000347363427499292f * adc * adc - 0.001025770762903f * adc + 2.68235340614337f;
+  float t = log(r) * -30.5280964239816f + 95.6841501312447f;
+  return t;
+}
+
 void deep_sleep() {
   // Deep sleep until woken by hardware
   CAN_reg_write(REG_CANCTRL, MODE_SLEEP);
@@ -516,6 +522,8 @@ int main()
         printf("Module %i Cell %i Voltage: %.4f\n", module, cell, v);
       }
     }
+    printf("Max Temp: %.2f\n", temperature(max_temperature));
+    printf("Min Temp: %.2f\n", temperature(min_temperature));
 
     // Send general status information to CAN
     uint8_t total_module_count = battery_interfaces[0].module_count + battery_interfaces[1].module_count + battery_interfaces[2].module_count;
