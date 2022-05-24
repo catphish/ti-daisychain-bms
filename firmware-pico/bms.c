@@ -13,7 +13,7 @@
 #include "can.h"
 #include <math.h>
 
-//#define USB_MODE
+#define USB_MODE
 
 // Min difference to enable balancing. 131 = 10mV
 #define BALANCE_DIFF 131
@@ -227,13 +227,13 @@ void wakeup(struct battery_interface * battery_interface) {
 
 // Send a command string
 void send_command(struct battery_interface * battery_interface, uint8_t* command, uint8_t length) {
+  uint16_t crc = crc16(command, length);
   // Append framing but to the first byte and send it
   pio_sm_put_blocking(pio0, battery_interface->sm, command[0] | 0x100);
   // Send remaining bytes
   for(int n=1; n<length; n++)
     pio_sm_put_blocking(pio0, battery_interface->sm, command[n]);
-  // Calculate and send CRC16
-  uint16_t crc = crc16(command, length);
+  // Send CRC16
   pio_sm_put_blocking(pio0, battery_interface->sm, crc & 0xFF);
   pio_sm_put_blocking(pio0, battery_interface->sm, crc >> 8);
   busy_wait_us(20); // Always insert a short pause after sending commands
@@ -272,10 +272,6 @@ void configure(struct battery_interface * battery_interface) {
   // Configure 16 devices with sequential addresses
   for(int n=0; n<16; n++) {
     send_command(battery_interface, (uint8_t[]){0xF1,0x0A,n}, 3);
-  }
-  for(int n=0; n<16; n++) {
-    // Attempt to read back the address from each device
-    send_command(battery_interface, (uint8_t[]){0x81,n,0x0A,0x00}, 4);
   }
 }
 
@@ -460,8 +456,9 @@ int main()
       // 24 values * 2 bytes + length + 2 byte checksum = 51
       uint16_t received = receive_data(battery_interfaces + chain, rx_data_buffer, 51, 10000);
       // Check RX CRC
-      uint16_t rx_crc = crc16(rx_data_buffer, 49);
-      if(received == 51 && (rx_crc & 0xFF) == rx_data_buffer[49] && (rx_crc >> 8) == rx_data_buffer[50] ) {
+      uint16_t rx_crc = crc16(rx_data_buffer, 51);
+      if(received == 51 && rx_crc == 0) {
+      //if(received == 51) {
         for(int cell=0; cell<16; cell++) {
           // nb. Cells are in reverse, cell 16 is reported first
           cell_voltage[module][cell] = rx_data_buffer[(15-cell)*2+1] << 8 | rx_data_buffer[(15-cell)*2+2];
@@ -478,7 +475,10 @@ int main()
           if(aux_voltage[module][aux] > min_temperature) min_temperature = aux_voltage[module][aux];
         }
       } else {
-        printf("Error!\n");
+        if(received == 51)
+          printf("CRC Error: %04x\n", rx_crc);
+        else
+          printf("RX Error: %i\n", received);
         error_count++;
         rewake = 1;
         balance_threshold = 0;
@@ -521,11 +521,12 @@ int main()
         float v = cell_voltage[module][cell] / 13107.f;
         printf("Module %i Cell %i Voltage: %.4f\n", module, cell, v);
       }
+      printf("Module %i T1: %.2f\n", module, temperature(aux_voltage[module][1]));
+      printf("Module %i T2: %.2f\n", module, temperature(aux_voltage[module][2]));
     }
-    printf("Max Temp: %.2f\n", temperature(max_temperature));
-    printf("Min Temp: %.2f\n", temperature(min_temperature));
 
     // Send general status information to CAN
+    pack_voltage /= 2;
     uint8_t total_module_count = battery_interfaces[0].module_count + battery_interfaces[1].module_count + battery_interfaces[2].module_count;
     CAN_transmit(0x4f0, (uint8_t[]){ pack_voltage>>24, pack_voltage>>16, pack_voltage>>8, pack_voltage, balance_threshold >> 8, balance_threshold, error_count, total_module_count }, 8);
     CAN_transmit(0x4f1, (uint8_t[]){ max_voltage >> 8, max_voltage, min_voltage >> 8, min_voltage, max_temperature >> 8, max_temperature, min_temperature >> 8, min_temperature }, 8);
