@@ -13,14 +13,25 @@
 #include "can.h"
 #include <math.h>
 
-#define USB_MODE
+// User configuration
 
 // Min difference to enable balancing. 131 = 10mV
 #define BALANCE_DIFF 131
 // Min absolute voltage to enable balancing. 52428 = 4.0V, 53738 = 4.1V, 54525 = 4.16V
 #define BALANCE_MIN 52428
+// Number of parallel strings
+#define PARALLEL_STRINGS 2
+// Enable (1) or disable (0) USB mode (no sleep)
+#define USB_MODE 0
+// Number of modules
+#define MODULES_1 10
+#define MODULES_2 10
+#define MODULES_3 0
 
-// The number of active battery interfaces
+// End of configuration
+
+
+// The number of battery interfaces on the board
 #define CHAIN_COUNT 3
 #define MAX_MODULES (16 * CHAIN_COUNT)
 
@@ -55,21 +66,21 @@ struct battery_interface battery_interfaces[3] = {
     .serial_master = 3,
     .serial_enable = 4,
     .serial_in     = 5,
-    .module_count  = 1,
+    .module_count  = MODULES_1,
     .sm            = 0,
   }, {
     .serial_out    = 6,
     .serial_master = 7,
     .serial_enable = 8,
     .serial_in     = 9,
-    .module_count  = 0,
+    .module_count  = MODULES_2,
     .sm            = 1,
   }, {
     .serial_out    = 10,
     .serial_master = 11,
     .serial_enable = 12,
     .serial_in     = 13,
-    .module_count  = 0,
+    .module_count  = MODULES_3,
     .sm            = 2,
   }
 };
@@ -358,11 +369,10 @@ int main()
 {
   // Set system clock to 80MHz, this seems like a reasonable value for the 4MHz data
   set_sys_clock_khz(80000, true);
-  #ifdef USB_MODE
+  if(USB_MODE)
       stdio_init_all();
-  #else
+  else
     reconfigure_clocks();
-  #endif
   // Used for program loading
   int offset;
 
@@ -458,7 +468,6 @@ int main()
       // Check RX CRC
       uint16_t rx_crc = crc16(rx_data_buffer, 51);
       if(received == 51 && rx_crc == 0) {
-      //if(received == 51) {
         for(int cell=0; cell<16; cell++) {
           // nb. Cells are in reverse, cell 16 is reported first
           cell_voltage[module][cell] = rx_data_buffer[(15-cell)*2+1] << 8 | rx_data_buffer[(15-cell)*2+2];
@@ -476,9 +485,9 @@ int main()
         }
       } else {
         if(received == 51)
-          printf("CRC Error: %04x\n", rx_crc);
+          printf("CRC Error %i %i: %04x\n", chain, submodule, rx_crc);
         else
-          printf("RX Error: %i\n", received);
+          printf("RX Error %i %i: %i\n", chain, submodule, received);
         error_count++;
         rewake = 1;
         balance_threshold = 0;
@@ -523,10 +532,13 @@ int main()
       }
       printf("Module %i T1: %.2f\n", module, temperature(aux_voltage[module][1]));
       printf("Module %i T2: %.2f\n", module, temperature(aux_voltage[module][2]));
+      printf("Module %i Balance: %02x\n", module, balance_bitmap[module]);
     }
+    float v = balance_threshold / 13107.f;
+    printf("Balance Threshold: %.2f\n", v);
 
     // Send general status information to CAN
-    pack_voltage /= 2;
+    pack_voltage /= PARALLEL_STRINGS;
     uint8_t total_module_count = battery_interfaces[0].module_count + battery_interfaces[1].module_count + battery_interfaces[2].module_count;
     CAN_transmit(0x4f0, (uint8_t[]){ pack_voltage>>24, pack_voltage>>16, pack_voltage>>8, pack_voltage, balance_threshold >> 8, balance_threshold, error_count, total_module_count }, 8);
     CAN_transmit(0x4f1, (uint8_t[]){ max_voltage >> 8, max_voltage, min_voltage >> 8, min_voltage, max_temperature >> 8, max_temperature, min_temperature >> 8, min_temperature }, 8);
@@ -534,13 +546,13 @@ int main()
 softreset:
     // Sleep for a minimum of 1 second per loop
     sleep_ms(1000);
-    #ifndef USB_MODE
+    if(!USB_MODE) {
       if(!balance_threshold && !gpio_get(WAKE1) && !gpio_get(WAKE2)) {
         // Sleep until woken by hardware
         sleep_modules();
         deep_sleep();
         rewake = 1;
       }
-    #endif
+    }
   }
 }
