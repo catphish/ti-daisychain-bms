@@ -327,9 +327,7 @@ void reconfigure_clocks() {
   clock_configure(clk_ref, CLOCKS_CLK_REF_CTRL_SRC_VALUE_XOSC_CLKSRC, 0, 12000000, 12000000);
   clock_configure(clk_rtc, 0, CLOCKS_CLK_RTC_CTRL_AUXSRC_VALUE_XOSC_CLKSRC, 12000000, 46875);
   // Shut down unused clocks, PLLs and oscillators
-  //clock_stop(clk_usb);
   clock_stop(clk_adc);
-  //pll_deinit(pll_usb);
   rosc_disable();
   // Disable more clocks when sleeping
   clocks_hw->sleep_en0 = CLOCKS_SLEEP_EN0_CLK_SYS_PLL_USB_BITS;
@@ -343,8 +341,8 @@ float temperature(uint16_t adc) {
 }
 
 void deep_sleep() {
-  // Deep sleep until woken by hardware; // Disconnect USB
-  tud_disconnect();
+  // Deep sleep until woken by hardware;
+  tud_disconnect(); // Disconnect USB
   CAN_reg_write(REG_CANCTRL, MODE_SLEEP);
   gpio_put(CAN_SLEEP, 1); // Sleep the CAN transceiver
   uint32_t s = save_and_disable_interrupts();
@@ -374,10 +372,8 @@ int main()
 {
   // Set system clock to 80MHz, this seems like a reasonable value for the 4MHz data
   set_sys_clock_khz(80000, true);
-  //if(USB_MODE)
-      stdio_init_all();
-  //else
-    reconfigure_clocks();
+  stdio_init_all();
+  reconfigure_clocks();
   // Used for program loading
   int offset;
 
