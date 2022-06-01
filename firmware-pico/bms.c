@@ -8,28 +8,26 @@
 #include "hardware/rosc.h"
 #include "hardware/clocks.h"
 #include "hardware/sync.h"
+#include "hardware/structs/usb.h"
+#include "hardware/regs/usb.h"
+#include "device/usbd.h"
 #include "bms.pio.h"
 #include "hardware/regs/io_bank0.h"
 #include "can.h"
 #include <math.h>
 
-// User configuration
-
-// Min difference to enable balancing. 131 = 10mV
-#define BALANCE_DIFF 131
-// Min absolute voltage to enable balancing. 52428 = 4.0V, 53738 = 4.1V, 54525 = 4.16V
-#define BALANCE_MIN 52428
 // Number of parallel strings
 #define PARALLEL_STRINGS 2
-// Enable (1) or disable (0) USB mode (no sleep)
-#define USB_MODE 0
 // Number of modules
 #define MODULES_1 10
 #define MODULES_2 10
 #define MODULES_3 0
+// Min absolute voltage to enable balancing. 52428 = 4.0V, 53738 = 4.1V, 54525 = 4.16V
+#define BALANCE_MIN 52428
+// Min difference to enable balancing. 131 = 10mV
+#define BALANCE_DIFF 131
 
-// End of configuration
-
+// It should not be necessary for most users to change anything below this point.
 
 // The number of battery interfaces on the board
 #define CHAIN_COUNT 3
@@ -329,13 +327,13 @@ void reconfigure_clocks() {
   clock_configure(clk_ref, CLOCKS_CLK_REF_CTRL_SRC_VALUE_XOSC_CLKSRC, 0, 12000000, 12000000);
   clock_configure(clk_rtc, 0, CLOCKS_CLK_RTC_CTRL_AUXSRC_VALUE_XOSC_CLKSRC, 12000000, 46875);
   // Shut down unused clocks, PLLs and oscillators
-  clock_stop(clk_usb);
+  //clock_stop(clk_usb);
   clock_stop(clk_adc);
-  pll_deinit(pll_usb);
+  //pll_deinit(pll_usb);
   rosc_disable();
   // Disable more clocks when sleeping
-  clocks_hw->sleep_en0 = 0;
-  clocks_hw->sleep_en1 = CLOCKS_WAKE_EN1_CLK_SYS_TIMER_BITS;
+  clocks_hw->sleep_en0 = CLOCKS_SLEEP_EN0_CLK_SYS_PLL_USB_BITS;
+  clocks_hw->sleep_en1 = CLOCKS_SLEEP_EN1_CLK_SYS_TIMER_BITS | CLOCKS_SLEEP_EN1_CLK_SYS_XOSC_BITS | CLOCKS_SLEEP_EN1_CLK_USB_USBCTRL_BITS | CLOCKS_SLEEP_EN1_CLK_SYS_USBCTRL_BITS;
 }
 
 float temperature(uint16_t adc) {
@@ -345,7 +343,8 @@ float temperature(uint16_t adc) {
 }
 
 void deep_sleep() {
-  // Deep sleep until woken by hardware
+  // Deep sleep until woken by hardware; // Disconnect USB
+  tud_disconnect();
   CAN_reg_write(REG_CANCTRL, MODE_SLEEP);
   gpio_put(CAN_SLEEP, 1); // Sleep the CAN transceiver
   uint32_t s = save_and_disable_interrupts();
@@ -363,15 +362,21 @@ void deep_sleep() {
   SPI_configure();
   gpio_put(CAN_SLEEP, 0); // Wake the CAN transceiver
   CAN_reg_write(REG_CANCTRL, MODE_NORMAL);
+  tud_connect();
+  stdio_usb_init(); // Restore USB
+}
+
+int usb_suspended() {
+  return(usb_hw->sie_status & USB_SIE_STATUS_SUSPENDED_BITS);
 }
 
 int main()
 {
   // Set system clock to 80MHz, this seems like a reasonable value for the 4MHz data
   set_sys_clock_khz(80000, true);
-  if(USB_MODE)
+  //if(USB_MODE)
       stdio_init_all();
-  else
+  //else
     reconfigure_clocks();
   // Used for program loading
   int offset;
@@ -544,15 +549,13 @@ int main()
     CAN_transmit(0x4f1, (uint8_t[]){ max_voltage >> 8, max_voltage, min_voltage >> 8, min_voltage, max_temperature >> 8, max_temperature, min_temperature >> 8, min_temperature }, 8);
 
 softreset:
-    // Sleep for a minimum of 1 second per loop
+    // Sleep for a minimum of 1 second per loop.
     sleep_ms(1000);
-    if(!USB_MODE) {
-      if(!balance_threshold && !gpio_get(WAKE1) && !gpio_get(WAKE2)) {
-        // Sleep until woken by hardware
-        sleep_modules();
-        deep_sleep();
-        rewake = 1;
-      }
+    // If there's no reason to be awake, go into very low power sleep
+    if(!balance_threshold && !gpio_get(WAKE1) && !gpio_get(WAKE2) && usb_suspended()) {
+      sleep_modules();
+      deep_sleep();
+      rewake = 1;
     }
   }
 }
