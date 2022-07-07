@@ -15,6 +15,7 @@ bitloop:
   out x, 1              sideset 1 // Load bit 9, this is the framing bit, if it's set, we transmit LH, else we transmit nothing (HH)
   mov pins, ! x    [4]  sideset 1 // Send first half of final bit (a 1 in bit 9 activates the framing)
   mov pins, ! NULL [4]  sideset 1 // Last half of final but is always high. Add a short delay before wrapping and releasing the line
+  nop              [15] sideset 0
 .wrap
 
 % c-sdk {
@@ -41,9 +42,7 @@ static inline void daisychain_tx_program_init(PIO pio, uint sm, uint offset, uin
 beginning:
   wait 0 pin 0       // Wait for data input to go low
   jmp pin beginning  // Start over if we're transmitting
-  mov x, !pins
-  jmp !x beginning
-  nop            [6] // Delay 7 cycles (nop + 6 more)
+  nop            [8] // Delay 9 cycles (nop + 8 more)
   set y, 7           // Initialize loop counter
 bitloop:
   in pins, 1         // Read the bit into the ISR
@@ -52,6 +51,7 @@ bitloop:
 
   in null, 24        // Dump 24 bits of zero into the ISR to right align the byte
   push noblock   [3] // Push to FIFO, delay 3 more cycles to fully skip first half of framing bit
+  nop [15]
 .wrap
 
 % c-sdk {

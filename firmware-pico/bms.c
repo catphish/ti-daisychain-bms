@@ -18,11 +18,11 @@
 #include "pico/stdlib.h"
 
 // Number of parallel strings
-#define PARALLEL_STRINGS 2
+#define PARALLEL_STRINGS 3
 // Number of modules
-#define MODULES_1 10
-#define MODULES_2 10
-#define MODULES_3 0
+#define MODULES_1 5
+#define MODULES_2 5
+#define MODULES_3 5
 // Min absolute voltage to enable balancing. 52428 = 4.0V, 53738 = 4.1V, 54525
 // = 4.16V
 #define BALANCE_MIN 52428
@@ -582,18 +582,22 @@ int main() {
           (uint8_t[]){0x92, submodule, 0x14, balance_bitmap[module] >> 8,
                       balance_bitmap[module]},
           5);
-      for (int cell = 0; cell < 16; cell++) {
-        float v = cell_voltage[module][cell] / 13107.f;
-        printf("Module %i Cell %i Voltage: %.4f\n", module, cell, v);
-      }
-      printf("Module %i T1: %.2f\n", module,
-             temperature(aux_voltage[module][1]));
-      printf("Module %i T2: %.2f\n", module,
-             temperature(aux_voltage[module][2]));
-      printf("Module %i Balance: %02x\n", module, balance_bitmap[module]);
+      // for (int cell = 0; cell < 16; cell++) {
+      //   float v = cell_voltage[module][cell] / 13107.f;
+      //   if (!usb_suspended())
+      //     printf("Module %i Cell %i Voltage: %.4f\n", module, cell, v);
+      // }
+      // if (!usb_suspended())
+      //   printf("Module %i T1: %.2f\n", module,
+      //          temperature(aux_voltage[module][1]));
+      // if (!usb_suspended())
+      //   printf("Module %i T2: %.2f\n", module,
+      //          temperature(aux_voltage[module][2]));
+      // if (!usb_suspended())
+      //   printf("Module %i Balance: %02x\n", module, balance_bitmap[module]);
     }
     float v = balance_threshold / 13107.f;
-    printf("Balance Threshold: %.2f\n", v);
+    if (!usb_suspended()) printf("Balance Threshold: %.2f\n", v);
 
     // Send general status information to CAN
     pack_voltage /= PARALLEL_STRINGS;
@@ -613,8 +617,8 @@ int main() {
                  8);
 
   softreset:
-    // Sleep for a minimum of 1 second per loop.
-    sleep_ms(1000);
+    // Sleep for a minimum of 500ms second per loop.
+    sleep_ms(500);
     // If there's no reason to be awake, go into very low power sleep
     if (!balance_threshold && !gpio_get(WAKE1) && !gpio_get(WAKE2) &&
         usb_suspended()) {
