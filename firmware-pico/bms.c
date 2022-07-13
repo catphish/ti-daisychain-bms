@@ -566,38 +566,34 @@ int main() {
       if (submodule >= battery_interfaces[chain].module_count) continue;
       balance_bitmap[module] = 0;
       uint16_t max_v = 0;
-      for (int cell = 0; cell < 16; cell++)
-        if (pcb_below_temp(module))  // Don't balance if PCB is hot
-          if (balance_threshold)     // Don't balance unless threshold set
-            if (cell_voltage[module][cell] >
-                balance_threshold)  // Compare cell voltage to threshold
-              if (cell_voltage[module][cell] >
-                  max_v) {  // Only balance the highest voltage cell
-                balance_bitmap[module] =
-                    (1 << cell);  // Only ever balance one cell
-                max_v = cell_voltage[module][cell];
-              }
+      if (pcb_below_temp(module) && balance_threshold)
+        for (int cell = 0; cell < 16; cell++)
+          if (cell_voltage[module][cell] > balance_threshold)
+            if (cell_voltage[module][cell] > max_v) {
+              balance_bitmap[module] = (1 << cell);
+              max_v = cell_voltage[module][cell];
+            }
       send_command(
           battery_interfaces + chain,
           (uint8_t[]){0x92, submodule, 0x14, balance_bitmap[module] >> 8,
                       balance_bitmap[module]},
           5);
-      // for (int cell = 0; cell < 16; cell++) {
-      //   float v = cell_voltage[module][cell] / 13107.f;
-      //   if (!usb_suspended())
-      //     printf("Module %i Cell %i Voltage: %.4f\n", module, cell, v);
-      // }
-      // if (!usb_suspended())
-      //   printf("Module %i T1: %.2f\n", module,
-      //          temperature(aux_voltage[module][1]));
-      // if (!usb_suspended())
-      //   printf("Module %i T2: %.2f\n", module,
-      //          temperature(aux_voltage[module][2]));
-      // if (!usb_suspended())
-      //   printf("Module %i Balance: %02x\n", module, balance_bitmap[module]);
+      if (!usb_suspended()) {
+        for (int cell = 0; cell < 16; cell++) {
+          float v = cell_voltage[module][cell] / 13107.f;
+          printf("Module %i Cell %i Voltage: %.4f\n", module, cell, v);
+        }
+        printf("Module %i T1: %.2f\n", module,
+               temperature(aux_voltage[module][1]));
+        printf("Module %i T2: %.2f\n", module,
+               temperature(aux_voltage[module][2]));
+        printf("Module %i Balance: %02x\n", module, balance_bitmap[module]);
+      }
     }
-    float v = balance_threshold / 13107.f;
-    if (!usb_suspended()) printf("Balance Threshold: %.2f\n", v);
+    if (!usb_suspended()) {
+      float v = balance_threshold / 13107.f;
+      printf("Balance Threshold: %.2f\n", v);
+    }
 
     // Send general status information to CAN
     pack_voltage /= PARALLEL_STRINGS;
