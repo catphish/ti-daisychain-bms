@@ -23,8 +23,8 @@
 #define MODULES_1 5
 #define MODULES_2 5
 #define MODULES_3 5
-// Min absolute voltage to enable balancing. 52428 = 4.0V, 53738 = 4.1V, 54525
-// = 4.16V
+// Min absolute voltage to enable balancing.
+// 52428 = 4.0V, 53738 = 4.1V, 54525 = 4.16V
 #define BALANCE_MIN 52428
 // Min difference to enable balancing. 131 = 10mV
 #define BALANCE_DIFF 131
@@ -407,6 +407,9 @@ int main() {
   // Used for program loading
   int offset;
 
+  //  Used to keep track of battery voltage data stream
+  uint8_t can_string = 0, can_module = 0, can_cell = 0;
+
   // Load and initialize the TX PIO program
   offset = pio_add_program(pio0, &daisychain_tx_program);
   for (int n = 0; n < CHAIN_COUNT; n++)
@@ -611,6 +614,24 @@ int main() {
                              min_voltage, max_temperature >> 8, max_temperature,
                              min_temperature >> 8, min_temperature},
                  8);
+    // Send out individual cell voltages one at a time
+    uint16_t v = cell_voltage[can_string * 16 + can_module][can_cell];
+    CAN_transmit(0x4f2,
+                 (uint8_t[]){can_string, can_module, can_cell, v >> 8, v}, 5);
+    can_cell++;
+    if (can_cell == 16) {
+      can_cell = 0;
+      can_module++;
+      if (can_module == battery_interfaces[can_string].module_count) {
+        can_module = 0;
+        if (can_string == 2)
+          can_string = 0;
+        else if (battery_interfaces[can_string + 1].module_count == 0)
+          can_string = 0;
+        else
+          can_string++;
+      }
+    }
 
   softreset:
     // Sleep for a minimum of 500ms second per loop.
