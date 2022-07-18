@@ -18,16 +18,18 @@
 #include "pico/stdlib.h"
 
 // Number of parallel strings
-#define PARALLEL_STRINGS 3
+#define PARALLEL_STRINGS 1
 // Number of modules
-#define MODULES_1 5
-#define MODULES_2 5
-#define MODULES_3 5
+#define MODULES_1 1
+#define MODULES_2 0
+#define MODULES_3 0
 // Min absolute voltage to enable balancing.
 // 52428 = 4.0V, 53738 = 4.1V, 54525 = 4.16V
 #define BALANCE_MIN 52428
 // Min difference to enable balancing. 131 = 10mV
 #define BALANCE_DIFF 131
+// Number of cells per module to bleed simultaneously
+#define MAX_BALANCE_CELLS 2
 
 // It should not be necessary for most users to change anything below this
 // point.
@@ -359,6 +361,11 @@ void reconfigure_clocks() {
                          CLOCKS_SLEEP_EN1_CLK_SYS_USBCTRL_BITS;
 }
 
+float voltage(uint16_t adc) {
+  float v = adc;
+  return (v / 13107.f);
+}
+
 float temperature(uint16_t adc) {
   float r = 0.0000000347363427499292f * adc * adc - 0.001025770762903f * adc +
             2.68235340614337f;
@@ -568,14 +575,27 @@ int main() {
       uint8_t submodule = module % 16;
       if (submodule >= battery_interfaces[chain].module_count) continue;
       balance_bitmap[module] = 0;
-      uint16_t max_v = 0;
+      // Only balance if conditions are appropriate
       if (pcb_below_temp(module) && balance_threshold)
-        for (int cell = 0; cell < 16; cell++)
-          if (cell_voltage[module][cell] > balance_threshold)
-            if (cell_voltage[module][cell] > max_v) {
-              balance_bitmap[module] = (1 << cell);
-              max_v = cell_voltage[module][cell];
-            }
+        // Add up to MAX_BALANCE_CELLS to balancing bitmap
+        for (int n = 0; n < MAX_BALANCE_CELLS; n++) {
+          uint16_t max_v = 0;
+          int8_t selected_cell = 0;
+          // Loop over each cell
+          for (int cell = 0; cell < 16; cell++) {
+            // Ignore cell if already balancing
+            if (balance_bitmap[module] & (1 << cell)) continue;
+            // If cell is highest cell so far, provisionally select it
+            if (cell_voltage[module][cell] > balance_threshold)
+              if (cell_voltage[module][cell] > max_v) {
+                selected_cell = cell + 1;
+                max_v = cell_voltage[module][cell];
+              }
+          }
+          // Add selected candidate to final bitmap
+          if (selected_cell)
+            balance_bitmap[module] |= (1 << (selected_cell - 1));
+        }
       send_command(
           battery_interfaces + chain,
           (uint8_t[]){0x92, submodule, 0x14, balance_bitmap[module] >> 8,
@@ -586,10 +606,13 @@ int main() {
           float v = cell_voltage[module][cell] / 13107.f;
           printf("Module %i Cell %i Voltage: %.4f\n", module, cell, v);
         }
-        printf("Module %i T1: %.2f\n", module,
-               temperature(aux_voltage[module][1]));
-        printf("Module %i T2: %.2f\n", module,
+        printf("Module %i T1: %.2f T2: %.2f\n", module,
+               temperature(aux_voltage[module][1]),
                temperature(aux_voltage[module][2]));
+        printf("Module %i PCB: %.2f %.2f %.2f %.2f\n", module,
+               voltage(aux_voltage[module][3]), voltage(aux_voltage[module][4]),
+               voltage(aux_voltage[module][5]),
+               voltage(aux_voltage[module][6]));
         printf("Module %i Balance: %02x\n", module, balance_bitmap[module]);
       }
     }
