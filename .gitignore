@@ -34,5 +34,5 @@ fp-info-cache
 # Archives
 *.zip
 
-# vscode config
-.vscode
+# vscode user-specific config
+.vscode/launch.json
