@@ -1,0 +1,37 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "CMake Configure",
+      "type": "shell",
+      "command": "cmake",
+      "args": [
+        "-B",
+        "${config:cmake.buildDirectory}",
+        "-G",
+        "Ninja",
+        "-DPICO_BOARD=pico",
+        "-DCMAKE_BUILD_TYPE=Release"
+      ],
+      "group": "build",
+      "problemMatcher": [],
+      "detail": "Configure the project with CMake (requires PICO_SDK_PATH and PICO_EXTRAS_PATH environment variables)"
+    },
+    {
+      "label": "Build",
+      "type": "shell",
+      "command": "cmake",
+      "args": [
+        "--build",
+        "${config:cmake.buildDirectory}"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "dependsOn": "CMake Configure",
+      "problemMatcher": ["$gcc"],
+      "detail": "Build the firmware using CMake and Ninja"
+    }
+  ]
+}

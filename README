@@ -3,6 +3,64 @@ TI Daisychain BMS Master
 
 BMS master for daisychained bq76PL455A slave modules.
 
+Building the Firmware
+=====================
+
+Prerequisites
+-------------
+
+The following tools must be installed before building:
+
+- CMake (https://cmake.org/download/)
+- Ninja build system (https://github.com/ninja-build/ninja/releases)
+- GNU Arm Embedded Toolchain / arm-none-eabi-gcc
+  (https://developer.arm.com/tools-and-software/open-source-software/developer-tools/gnu-toolchain/gnu-rm)
+- Raspberry Pi Pico SDK (https://github.com/raspberrypi/pico-sdk)
+- Raspberry Pi Pico Extras (https://github.com/raspberrypi/pico-extras)
+
+After installing the Pico SDK and Pico Extras, set the following environment
+variables so CMake can find them:
+
+  Windows (Command Prompt):
+    set PICO_SDK_PATH=C:\path\to\pico-sdk
+    set PICO_EXTRAS_PATH=C:\path\to\pico-extras
+
+  Linux / macOS:
+    export PICO_SDK_PATH=/path/to/pico-sdk
+    export PICO_EXTRAS_PATH=/path/to/pico-extras
+
+Building with VS Code
+---------------------
+
+1. Open the firmware-pico folder in VS Code
+   (File > Open Folder... > select firmware-pico)
+2. Install the recommended extensions when prompted
+   (ms-vscode.cmake-tools, ms-vscode.cpptools, marus25.cortex-debug,
+    raspberry-pi.raspberry-pi-pico)
+3. When prompted, select the ARM GCC toolchain kit
+4. Run Terminal > Run Build Task (Ctrl+Shift+B) to configure and build
+
+The compiled firmware files (bms.uf2, bms.elf, etc.) will be placed in the
+firmware-pico/build directory.
+
+Building from the Command Line
+-------------------------------
+
+The following commands use the same build flags as settings.json. If you
+change cmake.buildDirectory or cmake.configureArgs in settings.json, update
+these commands accordingly:
+
+  cd firmware-pico
+  cmake -B build -G Ninja -DPICO_BOARD=pico -DCMAKE_BUILD_TYPE=Release
+  cmake --build build
+
+Uploading to the Pico
+---------------------
+
+Hold the BOOTSEL button on the Pico and connect it to your PC via USB. It
+will appear as a mass-storage device (RPI-RP2). Copy firmware-pico/build/bms.uf2
+to that drive. The Pico will reboot and run the new firmware automatically.
+
 This board will communicate with up to 3 strings of bq76PL455A battery
 modules. Each string supports up to 16 modules, and each module supports
 up to 16 cells. A common configuration is 3 strings of 6 modules but any

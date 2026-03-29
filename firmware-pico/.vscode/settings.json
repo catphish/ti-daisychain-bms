@@ -1,3 +1,10 @@
 {
-  "C_Cpp.clang_format_style": "{ BasedOnStyle: Google, ColumnLimit: 9999 }"
+  "C_Cpp.clang_format_style": "{ BasedOnStyle: Google, ColumnLimit: 9999 }",
+  "cmake.buildDirectory": "${workspaceFolder}/build",
+  "cmake.configureArgs": [
+    "-DPICO_BOARD=pico",
+    "-DCMAKE_BUILD_TYPE=Release"
+  ],
+  "cmake.generator": "Ninja",
+  "cmake.configureOnOpen": true
 }
